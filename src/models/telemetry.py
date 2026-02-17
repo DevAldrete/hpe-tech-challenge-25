@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .vehicle import GeoLocation
+from src.models.vehicle import GeoLocation
 
 
 class VehicleTelemetry(BaseModel):
@@ -26,16 +26,10 @@ class VehicleTelemetry(BaseModel):
     odometer_km: float = Field(..., ge=0, description="Total distance traveled in km")
 
     # Engine & Powertrain
-    engine_temp_celsius: float = Field(
-        ..., ge=-40, le=150, description="Engine temperature"
-    )
+    engine_temp_celsius: float = Field(..., ge=-40, le=150, description="Engine temperature")
     engine_rpm: int = Field(..., ge=0, le=8000, description="Engine RPM")
-    coolant_temp_celsius: float = Field(
-        ..., ge=-40, le=150, description="Coolant temperature"
-    )
-    oil_pressure_psi: float = Field(
-        ..., ge=0, le=100, description="Oil pressure in PSI"
-    )
+    coolant_temp_celsius: float = Field(..., ge=-40, le=150, description="Coolant temperature")
+    oil_pressure_psi: float = Field(..., ge=0, le=100, description="Oil pressure in PSI")
     oil_temp_celsius: float = Field(..., ge=-40, le=200, description="Oil temperature")
     transmission_temp_celsius: float = Field(
         ..., ge=-40, le=150, description="Transmission temperature"
@@ -45,33 +39,23 @@ class VehicleTelemetry(BaseModel):
     )
 
     # Electrical System
-    battery_voltage: float = Field(
-        ..., ge=0, le=30, description="Battery voltage in volts"
-    )
+    battery_voltage: float = Field(..., ge=0, le=30, description="Battery voltage in volts")
     battery_current_amps: float = Field(
         ..., description="Battery current (+ charging, - discharging)"
     )
-    alternator_voltage: float = Field(
-        ..., ge=0, le=30, description="Alternator output voltage"
-    )
+    alternator_voltage: float = Field(..., ge=0, le=30, description="Alternator output voltage")
     battery_state_of_charge_percent: float = Field(
         ..., ge=0, le=100, description="Battery state of charge"
     )
-    battery_health_percent: float = Field(
-        ..., ge=0, le=100, description="Battery health indicator"
-    )
+    battery_health_percent: float = Field(..., ge=0, le=100, description="Battery health indicator")
 
     # Fuel System
-    fuel_level_percent: float = Field(
-        ..., ge=0, le=100, description="Fuel level percentage"
-    )
+    fuel_level_percent: float = Field(..., ge=0, le=100, description="Fuel level percentage")
     fuel_level_liters: float = Field(..., ge=0, description="Fuel level in liters")
     fuel_consumption_lph: float = Field(
         default=0.0, ge=0, description="Fuel consumption in liters per hour"
     )
-    fuel_economy_kml: float | None = Field(
-        None, ge=0, description="Fuel economy in km per liter"
-    )
+    fuel_economy_kml: float | None = Field(None, ge=0, description="Fuel economy in km per liter")
 
     # Braking System
     brake_pad_thickness_mm: dict[str, float] = Field(
@@ -115,15 +99,9 @@ class VehicleTelemetry(BaseModel):
     )
 
     # Environmental
-    cabin_temp_celsius: float = Field(
-        default=20.0, description="Interior cabin temperature"
-    )
-    exterior_temp_celsius: float = Field(
-        default=20.0, description="Exterior temperature"
-    )
-    humidity_percent: float = Field(
-        default=50.0, ge=0, le=100, description="Humidity percentage"
-    )
+    cabin_temp_celsius: float = Field(default=20.0, description="Interior cabin temperature")
+    exterior_temp_celsius: float = Field(default=20.0, description="Exterior temperature")
+    humidity_percent: float = Field(default=50.0, ge=0, le=100, description="Humidity percentage")
 
     # Emergency Equipment Status
     siren_active: bool = Field(default=False, description="Emergency siren active")

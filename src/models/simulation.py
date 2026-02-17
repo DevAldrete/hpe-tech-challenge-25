@@ -6,7 +6,7 @@ This module contains data structures for configuring realistic vehicle simulatio
 
 from pydantic import BaseModel, Field
 
-from .enums import FailureScenario, VehicleType
+from src.models.enums import FailureScenario, VehicleType
 
 
 class ScenarioParameters(BaseModel):
@@ -19,15 +19,11 @@ class ScenarioParameters(BaseModel):
     progression_rate: float = Field(
         ..., ge=0, le=1, description="How fast failure progresses (0.0-1.0)"
     )
-    baseline_probability: float = Field(
-        ..., ge=0, le=1, description="Starting failure probability"
-    )
+    baseline_probability: float = Field(..., ge=0, le=1, description="Starting failure probability")
     affected_metrics: list[str] = Field(
         ..., description="Telemetry metrics affected by this scenario"
     )
-    noise_level: float = Field(
-        default=0.1, ge=0, le=1, description="Random variation level"
-    )
+    noise_level: float = Field(default=0.1, ge=0, le=1, description="Random variation level")
 
     model_config = {
         "json_schema_extra": {
@@ -51,12 +47,8 @@ class SimulationConfig(BaseModel):
     """Configuration for entire simulation run."""
 
     simulation_id: str = Field(..., description="Unique simulation identifier")
-    duration_seconds: int = Field(
-        default=3600, ge=0, description="Total simulation duration"
-    )
-    num_vehicles: int = Field(
-        default=10, ge=1, description="Number of vehicles to simulate"
-    )
+    duration_seconds: int = Field(default=3600, ge=0, description="Total simulation duration")
+    num_vehicles: int = Field(default=10, ge=1, description="Number of vehicles to simulate")
     vehicle_types: dict[VehicleType, int] = Field(
         default_factory=lambda: {
             VehicleType.AMBULANCE: 6,
@@ -66,9 +58,7 @@ class SimulationConfig(BaseModel):
     )
 
     # Failure injection
-    inject_failures: bool = Field(
-        default=True, description="Whether to inject failures"
-    )
+    inject_failures: bool = Field(default=True, description="Whether to inject failures")
     failure_scenarios: list[FailureScenario] = Field(
         default_factory=list, description="Specific scenarios to simulate"
     )
@@ -80,12 +70,8 @@ class SimulationConfig(BaseModel):
     telemetry_frequency_hz: float = Field(
         default=1.0, ge=0.1, le=10.0, description="Telemetry generation frequency"
     )
-    add_realistic_noise: bool = Field(
-        default=True, description="Add realistic sensor noise"
-    )
-    simulate_gps_drift: bool = Field(
-        default=True, description="Simulate GPS inaccuracy"
-    )
+    add_realistic_noise: bool = Field(default=True, description="Add realistic sensor noise")
+    simulate_gps_drift: bool = Field(default=True, description="Simulate GPS inaccuracy")
 
     # Operational patterns
     dispatch_probability_per_hour: float = Field(
@@ -126,16 +112,10 @@ class SimulationConfig(BaseModel):
 class WeatherConditions(BaseModel):
     """Environmental conditions affecting vehicle performance."""
 
-    condition_type: str = Field(
-        ..., description="Weather type (clear, rain, snow, extreme_heat)"
-    )
+    condition_type: str = Field(..., description="Weather type (clear, rain, snow, extreme_heat)")
     ambient_temp_celsius: float = Field(..., description="Ambient temperature")
-    humidity_percent: float = Field(
-        ..., ge=0, le=100, description="Humidity percentage"
-    )
-    road_friction: float = Field(
-        default=1.0, ge=0, le=1.0, description="Road friction coefficient"
-    )
+    humidity_percent: float = Field(..., ge=0, le=100, description="Humidity percentage")
+    road_friction: float = Field(default=1.0, ge=0, le=1.0, description="Road friction coefficient")
     visibility_factor: float = Field(
         default=1.0, ge=0, le=1.0, description="Visibility factor (1.0 = clear)"
     )
