@@ -30,12 +30,37 @@ Creamos **Gemelos Digitales** de vehículos de emergencia (ambulancias, bomberos
 ### 2. La Implementación Actual
 
 *Lo que corre actualmente en este repositorio para la demostración.*
+
 El sistema se simula utilizando contenedores Docker para representar los nodos de la red:
 
-1. **Vehicle Nodes (Agentes):** Scripts en Python que simulan la física del vehículo y generan telemetría (sintética/ABM).
-2. **Message Broker (Redis/MQTT):** La "tubería" de comunicación en tiempo real.
-3. **Central Brain (Orquestador):** Servicio que recibe alertas, gestiona el estado de la flota y asigna recursos.
-4. **Dashboard (Frontend):** Visualización en tiempo real del estado de los gemelos y alertas predictivas.
+* **Vehicle Nodes (Agentes):** Scripts en Python que simulan la física del vehículo y generan telemetría (sintética/ABM).
+* **Message Broker (Redis/MQTT):** La "tubería" de comunicación en tiempo real.
+* **Central Brain (Orquestador):** Servicio que recibe alertas, gestiona el estado de la flota y asigna recursos.
+* **Dashboard (Frontend):** Visualización en tiempo real del estado de los gemelos y alertas predictivas.
+
+---
+
+## 🚀 Roadmap & Consideraciones Futuras
+
+Para escalar AEGIS a un entorno de producción masivo y mejorar la autonomía de los agentes, el proyecto contempla las siguientes evoluciones arquitectónicas:
+
+### A. Defensa Predictiva Bio-inspirada en el Edge
+
+Mover la inferencia de anomalías directamente al hardware del vehículo (IoT) para reducir latencia y dependencia de la red.
+
+* **Estrategia:** Transición de modelos tradicionales a Autoencoders LSTM o **Redes Neuronales Pulsantes (SNNs)**. El uso de SNNs, inspiradas en la neurociencia computacional, permitirá procesar series de tiempo de telemetría de forma asíncrona, reduciendo drásticamente el consumo energético en los microcontroladores del vehículo.
+
+### B. Ecosistema MARL (Multi-Agent Reinforcement Learning)
+
+Eliminar el punto único de fallo del "Cerebro Central" permitiendo que los agentes negocien rutas y prioridades entre ellos.
+
+* **Estrategia:** Implementar algoritmos como MAPPO integrados con Graph Neural Networks (GNNs). Esto permitirá modelar la ciudad como un grafo espacial, donde cada gemelo digital aprende a tomar decisiones descentralizadas para maximizar una recompensa global (ej. minimizar el tiempo de respuesta de toda la flota ante un desastre).
+
+### C. Motor de Simulación de Alta Concurrencia
+
+Superar las limitaciones del Global Interpreter Lock (GIL) de Python en la generación masiva de telemetría sintética.
+
+* **Estrategia:** Reescritura del motor físico y de generación de agentes utilizando lenguajes de bajo nivel seguros en memoria como **Rust**. Esto habilitará una concurrencia masiva real, permitiendo simular miles de vehículos enviando datos vía WebSockets a altos *tick rates* sin colapsar el orquestador, manteniendo a Python exclusivamente para la inferencia de IA pesada.
 
 ## 👥 Contribución
 

@@ -8,7 +8,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from .enums import OperationalStatus, VehicleType
+from src.models.enums import OperationalStatus, VehicleType
 
 
 class GeoLocation(BaseModel):
@@ -16,13 +16,9 @@ class GeoLocation(BaseModel):
 
     latitude: float = Field(..., ge=-90, le=90, description="Latitude in degrees")
     longitude: float = Field(..., ge=-180, le=180, description="Longitude in degrees")
-    altitude: float = Field(
-        default=0.0, description="Altitude in meters above sea level"
-    )
+    altitude: float = Field(default=0.0, description="Altitude in meters above sea level")
     accuracy: float = Field(default=10.0, description="GPS accuracy in meters")
-    heading: float = Field(
-        default=0.0, ge=0, le=360, description="Direction in degrees"
-    )
+    heading: float = Field(default=0.0, ge=0, le=360, description="Direction in degrees")
     speed_kmh: float = Field(default=0.0, ge=0, description="Speed in km/h")
     timestamp: datetime
 
@@ -84,14 +80,10 @@ class VehicleState(BaseModel):
     timestamp: datetime
     operational_status: OperationalStatus
     mission_id: str | None = Field(None, description="Current emergency/mission ID")
-    assigned_crew: list[str] = Field(
-        default_factory=list, description="List of crew member IDs"
-    )
+    assigned_crew: list[str] = Field(default_factory=list, description="List of crew member IDs")
     crew_count: int = Field(default=0, ge=0, description="Number of personnel on board")
     destination: GeoLocation | None = Field(None, description="Target location")
-    eta_seconds: int | None = Field(
-        None, ge=0, description="Estimated time to destination"
-    )
+    eta_seconds: int | None = Field(None, ge=0, description="Estimated time to destination")
 
     model_config = {
         "json_schema_extra": {

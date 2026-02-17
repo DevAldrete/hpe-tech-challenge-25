@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .enums import AlertSeverity, FailureCategory, MaintenanceUrgency
+from src.models.enums import AlertSeverity, FailureCategory, MaintenanceUrgency
 
 
 class PredictiveAlert(BaseModel):
@@ -31,28 +31,18 @@ class PredictiveAlert(BaseModel):
     failure_probability: float = Field(
         ..., ge=0, le=1, description="Probability of failure (0.0-1.0)"
     )
-    confidence: float = Field(
-        ..., ge=0, le=1, description="Model confidence score (0.0-1.0)"
-    )
+    confidence: float = Field(..., ge=0, le=1, description="Model confidence score (0.0-1.0)")
 
     # Prediction Time Window
-    predicted_failure_min_hours: float = Field(
-        ..., ge=0, description="Minimum hours until failure"
-    )
-    predicted_failure_max_hours: float = Field(
-        ..., ge=0, description="Maximum hours until failure"
-    )
+    predicted_failure_min_hours: float = Field(..., ge=0, description="Minimum hours until failure")
+    predicted_failure_max_hours: float = Field(..., ge=0, description="Maximum hours until failure")
     predicted_failure_likely_hours: float = Field(
         ..., ge=0, description="Most likely hours until failure"
     )
 
     # Actionable Information
-    can_complete_current_mission: bool = Field(
-        ..., description="Safe to complete current mission"
-    )
-    recommended_action: str = Field(
-        ..., description="Human-readable recommended action"
-    )
+    can_complete_current_mission: bool = Field(..., description="Safe to complete current mission")
+    recommended_action: str = Field(..., description="Human-readable recommended action")
     safe_to_operate: bool = Field(..., description="Vehicle safe for operation")
 
     # Context & Metadata
@@ -62,20 +52,12 @@ class PredictiveAlert(BaseModel):
     related_telemetry: dict[str, Any] = Field(
         default_factory=dict, description="Snapshot of relevant telemetry values"
     )
-    model_version: str = Field(
-        default="1.0.0", description="ML model version that generated alert"
-    )
+    model_version: str = Field(default="1.0.0", description="ML model version that generated alert")
 
     # Orchestrator Response
-    acknowledged: bool = Field(
-        default=False, description="Alert acknowledged by orchestrator"
-    )
-    acknowledged_by: str | None = Field(
-        None, description="User/system that acknowledged"
-    )
-    acknowledged_at: datetime | None = Field(
-        None, description="Timestamp of acknowledgment"
-    )
+    acknowledged: bool = Field(default=False, description="Alert acknowledged by orchestrator")
+    acknowledged_by: str | None = Field(None, description="User/system that acknowledged")
+    acknowledged_at: datetime | None = Field(None, description="Timestamp of acknowledgment")
 
     model_config = {
         "json_schema_extra": {
@@ -121,16 +103,10 @@ class MaintenanceRecommendation(BaseModel):
     recommended_action: str = Field(..., description="Recommended maintenance action")
 
     # Resource Estimates
-    estimated_downtime_hours: float = Field(
-        ..., ge=0, description="Expected vehicle downtime"
-    )
-    parts_needed: list[str] = Field(
-        default_factory=list, description="Required replacement parts"
-    )
+    estimated_downtime_hours: float = Field(..., ge=0, description="Expected vehicle downtime")
+    parts_needed: list[str] = Field(default_factory=list, description="Required replacement parts")
     estimated_labor_hours: float = Field(..., ge=0, description="Estimated labor time")
-    estimated_cost_usd: float | None = Field(
-        None, ge=0, description="Estimated cost in USD"
-    )
+    estimated_cost_usd: float | None = Field(None, ge=0, description="Estimated cost in USD")
 
     # Deferral Options
     can_defer: bool = Field(..., description="Whether maintenance can be postponed")

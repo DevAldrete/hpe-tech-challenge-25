@@ -1,0 +1,394 @@
+# ============================================================================
+# Project AEGIS - Docker Compose Configuration
+# Emergency Vehicle Digital Twin System
+# ============================================================================
+#
+# Services:
+#   - redis: Message broker for pub/sub telemetry
+#   - postgres: Time-series storage for telemetry and alerts
+#   - orchestrator: Central coordinator with WebSocket API
+#   - vehicle-agent-*: Individual vehicle digital twins
+#   - dashboard: Web UI for visualization
+#   - redis-commander: Redis web UI (dev tool)
+#
+# Usage:
+#   docker-compose up -d                    # Start all services
+#   docker-compose up orchestrator redis    # Start specific services
+#   docker-compose logs -f vehicle-agent-1  # View logs
+#   docker-compose down -v                  # Stop and remove volumes
+# ============================================================================
+
+# ===========================================================================
+# Network Configuration
+# ===========================================================================
+networks:
+  aegis-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ===========================================================================
+# Persistent Volumes
+# ===========================================================================
+volumes:
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+  telemetry-logs:
+    driver: local
+
+# ===========================================================================
+# Service Definitions
+# ===========================================================================
+services:
+  # -------------------------------------------------------------------------
+  # Redis - Message Broker for Real-time Telemetry
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    container_name: aegis-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      aegis-network:
+        ipv4_address: 172.20.0.10
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL - Time-series Database
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: aegis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aegis_db
+      POSTGRES_USER: aegis_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegis_secure_pass_2026}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.utf8"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      aegis-network:
+        ipv4_address: 172.20.0.11
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis_user -d aegis_db"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # -------------------------------------------------------------------------
+  # Orchestrator - Central Brain with WebSocket API
+  # -------------------------------------------------------------------------
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: aegis-orchestrator
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "src.orchestrator.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+      ]
+    environment:
+      # Application
+      AEGIS_ENV: production
+      LOG_LEVEL: INFO
+
+      # Redis connection
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+
+      # PostgreSQL connection
+      DATABASE_URL: postgresql+asyncpg://aegis_user:${POSTGRES_PASSWORD:-aegis_secure_pass_2026}@postgres:5432/aegis_db
+
+      # WebSocket configuration
+      WS_MAX_CONNECTIONS: 1000
+      WS_HEARTBEAT_INTERVAL: 30
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      aegis-network:
+        ipv4_address: 172.20.0.20
+    volumes:
+      - telemetry-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # -------------------------------------------------------------------------
+  # Vehicle Agent 1 - Ambulance (AMB-001)
+  # -------------------------------------------------------------------------
+  vehicle-agent-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: aegis-vehicle-amb-001
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "-m",
+        "src.scripts.start_vehicle",
+        "--vehicle-id",
+        "AMB-001",
+        "--vehicle-type",
+        "ambulance",
+      ]
+    environment:
+      AEGIS_ENV: production
+      VEHICLE_ID: AMB-001
+      VEHICLE_TYPE: ambulance
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELEMETRY_INTERVAL: 5
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    networks:
+      - aegis-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 256M
+
+  # -------------------------------------------------------------------------
+  # Vehicle Agent 2 - Fire Truck (FIR-001)
+  # -------------------------------------------------------------------------
+  vehicle-agent-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: aegis-vehicle-fir-001
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "-m",
+        "src.scripts.start_vehicle",
+        "--vehicle-id",
+        "FIR-001",
+        "--vehicle-type",
+        "fire_truck",
+      ]
+    environment:
+      AEGIS_ENV: production
+      VEHICLE_ID: FIR-001
+      VEHICLE_TYPE: fire_truck
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELEMETRY_INTERVAL: 5
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    networks:
+      - aegis-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 256M
+
+  # -------------------------------------------------------------------------
+  # Vehicle Agent 3 - Ambulance (AMB-002)
+  # -------------------------------------------------------------------------
+  vehicle-agent-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: aegis-vehicle-amb-002
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "-m",
+        "src.scripts.start_vehicle",
+        "--vehicle-id",
+        "AMB-002",
+        "--vehicle-type",
+        "ambulance",
+      ]
+    environment:
+      AEGIS_ENV: production
+      VEHICLE_ID: AMB-002
+      VEHICLE_TYPE: ambulance
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELEMETRY_INTERVAL: 5
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    networks:
+      - aegis-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 256M
+
+  # -------------------------------------------------------------------------
+  # Dashboard - Web UI for Real-time Visualization
+  # -------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: aegis-dashboard
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "src.dashboard.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "3000",
+      ]
+    environment:
+      AEGIS_ENV: production
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      WS_URL: ws://orchestrator:8000/ws
+      LOG_LEVEL: INFO
+    ports:
+      - "3000:3000"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    networks:
+      aegis-network:
+        ipv4_address: 172.20.0.30
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # -------------------------------------------------------------------------
+  # Redis Commander - Web UI for Redis (Development Tool)
+  # -------------------------------------------------------------------------
+  redis-commander:
+    image: ghcr.io/joeferner/redis-commander:latest
+    container_name: aegis-redis-ui
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: "local:redis:6379"
+      HTTP_USER: ${REDIS_UI_USER:-admin}
+      HTTP_PASSWORD: ${REDIS_UI_PASS:-aegis2026}
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - aegis-network
+    profiles:
+      - dev
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 128M
+
+  # -------------------------------------------------------------------------
+  # PgAdmin - PostgreSQL Web UI (Development Tool)
+  # -------------------------------------------------------------------------
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: aegis-pgadmin
+  #   restart: unless-stopped
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@aegis.local}
+  #     PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-aegis2026}
+  #     PGADMIN_CONFIG_SERVER_MODE: "False"
+  #     PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+  #   ports:
+  #     - "5050:80"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   networks:
+  #     - aegis-network
+  #   volumes:
+  #     - ./docker/pgadmin-servers.json:/pgadmin4/servers.json:ro
+  #   profiles:
+  #     - dev
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: "0.3"
+  #         memory: 256M

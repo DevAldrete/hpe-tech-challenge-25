@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "AEGIS PostgreSQL",
+      "Group": "Project AEGIS",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "aegis_db",
+      "Username": "aegis_user",
+      "SSLMode": "prefer",
+      "PassFile": "/tmp/pgpassfile"
+    }
+  }
+}
