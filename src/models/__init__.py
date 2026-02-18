@@ -6,6 +6,8 @@ messages, and simulation configurations.
 """
 
 # Enums
+# Alert models
+from .alerts import MaintenanceRecommendation, PredictiveAlert
 from .enums import (
     AlertSeverity,
     CommandType,
@@ -17,15 +19,6 @@ from .enums import (
     OperationalStatus,
     VehicleType,
 )
-
-# Vehicle models
-from .vehicle import GeoLocation, VehicleIdentity, VehicleState
-
-# Telemetry models
-from .telemetry import VehicleTelemetry
-
-# Alert models
-from .alerts import MaintenanceRecommendation, PredictiveAlert
 
 # Message models
 from .messages import (
@@ -39,6 +32,12 @@ from .messages import (
 
 # Simulation models
 from .simulation import ScenarioParameters, SimulationConfig, WeatherConditions
+
+# Telemetry models
+from .telemetry import VehicleTelemetry
+
+# Vehicle models
+from .vehicle import GeoLocation, VehicleIdentity, VehicleState
 
 __all__ = [
     # Enums
