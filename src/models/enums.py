@@ -12,6 +12,7 @@ class VehicleType(str, Enum):
 
     AMBULANCE = "ambulance"
     FIRE_TRUCK = "fire_truck"
+    POLICE = "police"
 
 
 class OperationalStatus(str, Enum):

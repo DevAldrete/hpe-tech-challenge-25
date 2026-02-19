@@ -2,10 +2,23 @@
 Data models for Project AEGIS.
 
 This package contains all Pydantic models for vehicle telemetry, alerts,
-messages, and simulation configurations.
+messages, simulation configurations, emergencies, and dispatch.
 """
 
 # Enums
+# Alert models
+from .alerts import MaintenanceRecommendation, PredictiveAlert
+
+# Dispatch models
+from .dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
+from .emergency import (
+    EMERGENCY_UNITS_DEFAULTS,
+    Emergency,
+    EmergencySeverity,
+    EmergencyStatus,
+    EmergencyType,
+    UnitsRequired,
+)
 from .enums import (
     AlertSeverity,
     CommandType,
@@ -17,15 +30,6 @@ from .enums import (
     OperationalStatus,
     VehicleType,
 )
-
-# Vehicle models
-from .vehicle import GeoLocation, VehicleIdentity, VehicleState
-
-# Telemetry models
-from .telemetry import VehicleTelemetry
-
-# Alert models
-from .alerts import MaintenanceRecommendation, PredictiveAlert
 
 # Message models
 from .messages import (
@@ -39,6 +43,12 @@ from .messages import (
 
 # Simulation models
 from .simulation import ScenarioParameters, SimulationConfig, WeatherConditions
+
+# Telemetry models
+from .telemetry import VehicleTelemetry
+
+# Vehicle models
+from .vehicle import GeoLocation, VehicleIdentity, VehicleState
 
 __all__ = [
     # Enums
@@ -71,4 +81,15 @@ __all__ = [
     "ScenarioParameters",
     "SimulationConfig",
     "WeatherConditions",
+    # Emergency
+    "EMERGENCY_UNITS_DEFAULTS",
+    "Emergency",
+    "EmergencySeverity",
+    "EmergencyStatus",
+    "EmergencyType",
+    "UnitsRequired",
+    # Dispatch
+    "Dispatch",
+    "DispatchedUnit",
+    "VehicleStatusSnapshot",
 ]
