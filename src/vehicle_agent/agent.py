@@ -6,11 +6,13 @@ and manages the main event loop.
 """
 
 import asyncio
+import json
 import signal
 from typing import Any
 
 import structlog
 
+from src.models.enums import OperationalStatus
 from src.vehicle_agent.anomaly_detector import AnomalyDetector
 from src.vehicle_agent.config import AgentConfig
 from src.vehicle_agent.failure_injector import FailureInjector
@@ -28,6 +30,15 @@ class VehicleAgent:
 
     The agent runs a main loop at the configured frequency (default 1 Hz),
     generating and publishing telemetry data to Redis.
+
+    It also subscribes to its own commands channel so the orchestrator can
+    dispatch it to an emergency.  On receiving a ``dispatch`` command the
+    agent transitions to EN_ROUTE.  On receiving a ``resolve`` broadcast it
+    returns to IDLE.
+
+    Attributes:
+        operational_status: Current operational status of the vehicle.
+        current_emergency_id: ID of the emergency the vehicle is handling, if any.
     """
 
     def __init__(self, config: AgentConfig) -> None:
@@ -41,6 +52,13 @@ class VehicleAgent:
         self.running = False
         self.uptime_seconds = 0.0
         self.heartbeat_counter = 0
+
+        # Mutable operational state (updated by dispatch commands)
+        self.operational_status: OperationalStatus = config.initial_status
+        self.current_emergency_id: str | None = None
+
+        # Internal task handle for the command listener
+        self._command_listener_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
         # Initialize components
         self.redis_client = RedisClient(config)
@@ -59,7 +77,8 @@ class VehicleAgent:
         """
         Start the vehicle agent.
 
-        Establishes Redis connection and prepares for operation.
+        Establishes Redis connection, prepares for operation, and starts the
+        background command listener task.
 
         Raises:
             RuntimeError: If agent is already running
@@ -74,6 +93,13 @@ class VehicleAgent:
         await self.redis_client.connect()
 
         self.running = True
+
+        # Start background task that listens for dispatch commands
+        self._command_listener_task = asyncio.create_task(
+            self._listen_for_commands(),
+            name=f"cmd-listener-{self.config.vehicle_id}",
+        )
+
         logger.info("agent_started", vehicle_id=self.config.vehicle_id)
 
     async def stop(self) -> None:
@@ -84,6 +110,14 @@ class VehicleAgent:
         logger.info("agent_stopping", vehicle_id=self.config.vehicle_id)
 
         self.running = False
+
+        # Cancel the command listener task
+        if self._command_listener_task and not self._command_listener_task.done():
+            self._command_listener_task.cancel()
+            try:
+                await self._command_listener_task
+            except asyncio.CancelledError:
+                pass
 
         # Disconnect from Redis
         await self.redis_client.disconnect()
@@ -225,4 +259,120 @@ class VehicleAgent:
             "uptime_seconds": self.uptime_seconds,
             "redis_connected": self.redis_client.is_connected,
             "sequence_number": self.telemetry_generator.sequence_number,
+            "operational_status": self.operational_status.value,
+            "current_emergency_id": self.current_emergency_id,
         }
+
+    async def _listen_for_commands(self) -> None:
+        """Subscribe to this vehicle's commands channel and handle incoming commands.
+
+        Runs as a background task alongside the main telemetry loop.
+        Subscribes to two channels:
+
+        - ``aegis:{fleet_id}:commands:{vehicle_id}`` — per-vehicle dispatch assignments.
+        - ``aegis:dispatch:*:resolved`` — broadcast when an emergency is resolved.
+
+        The method exits cleanly when the task is cancelled or the agent stops.
+        """
+        redis_conn = self.redis_client.redis
+        if redis_conn is None:
+            logger.warning("command_listener_no_redis", vehicle_id=self.config.vehicle_id)
+            return
+
+        commands_channel = self.config.get_channel_name("commands")
+        resolved_pattern = "aegis:dispatch:*:resolved"
+
+        pubsub = redis_conn.pubsub()
+        try:
+            await pubsub.subscribe(commands_channel)
+            await pubsub.psubscribe(resolved_pattern)
+
+            logger.info(
+                "command_listener_started",
+                vehicle_id=self.config.vehicle_id,
+                commands_channel=commands_channel,
+            )
+
+            async for raw in pubsub.listen():
+                if not self.running:
+                    break
+                if raw["type"] not in ("message", "pmessage"):
+                    continue
+                data = raw.get("data", "")
+                if not data or not isinstance(data, str):
+                    continue
+                await self._handle_command(data)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(
+                "command_listener_error",
+                vehicle_id=self.config.vehicle_id,
+                error=str(e),
+            )
+        finally:
+            try:
+                await pubsub.unsubscribe()
+                await pubsub.punsubscribe()
+                await pubsub.close()
+            except Exception:
+                pass
+
+    async def _handle_command(self, raw_data: str) -> None:
+        """Parse and react to a single command payload.
+
+        Supports two commands:
+
+        - ``dispatch`` — transitions the vehicle to EN_ROUTE and records the
+          emergency ID.
+        - ``resolve`` — transitions the vehicle back to IDLE and clears the
+          emergency ID (only if this vehicle was assigned to that emergency).
+
+        Args:
+            raw_data: Raw JSON string received from the Redis channel.
+        """
+        try:
+            payload = json.loads(raw_data)
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "command_parse_error",
+                vehicle_id=self.config.vehicle_id,
+                error=str(e),
+            )
+            return
+
+        command = payload.get("command", "")
+
+        if command == "dispatch":
+            emergency_id = payload.get("emergency_id")
+            emergency_type = payload.get("emergency_type", "unknown")
+            self.operational_status = OperationalStatus.EN_ROUTE
+            self.current_emergency_id = emergency_id
+            logger.info(
+                "dispatch_command_received",
+                vehicle_id=self.config.vehicle_id,
+                emergency_id=emergency_id,
+                emergency_type=emergency_type,
+                new_status=self.operational_status.value,
+            )
+
+        elif command == "resolve":
+            emergency_id = payload.get("emergency_id")
+            released = payload.get("released_vehicles", [])
+            if self.config.vehicle_id in released:
+                self.operational_status = OperationalStatus.IDLE
+                self.current_emergency_id = None
+                logger.info(
+                    "resolve_command_received",
+                    vehicle_id=self.config.vehicle_id,
+                    emergency_id=emergency_id,
+                    new_status=self.operational_status.value,
+                )
+
+        else:
+            logger.debug(
+                "unknown_command",
+                vehicle_id=self.config.vehicle_id,
+                command=command,
+            )

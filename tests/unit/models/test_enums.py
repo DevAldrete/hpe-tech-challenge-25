@@ -36,7 +36,7 @@ class TestVehicleType:
 
     def test_vehicle_type_count(self) -> None:
         """Test VehicleType has expected number of members."""
-        assert len(VehicleType) == 2
+        assert len(VehicleType) == 3
 
 
 @pytest.mark.unit

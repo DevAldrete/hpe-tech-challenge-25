@@ -2,12 +2,23 @@
 Data models for Project AEGIS.
 
 This package contains all Pydantic models for vehicle telemetry, alerts,
-messages, and simulation configurations.
+messages, simulation configurations, emergencies, and dispatch.
 """
 
 # Enums
 # Alert models
 from .alerts import MaintenanceRecommendation, PredictiveAlert
+
+# Dispatch models
+from .dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
+from .emergency import (
+    EMERGENCY_UNITS_DEFAULTS,
+    Emergency,
+    EmergencySeverity,
+    EmergencyStatus,
+    EmergencyType,
+    UnitsRequired,
+)
 from .enums import (
     AlertSeverity,
     CommandType,
@@ -70,4 +81,15 @@ __all__ = [
     "ScenarioParameters",
     "SimulationConfig",
     "WeatherConditions",
+    # Emergency
+    "EMERGENCY_UNITS_DEFAULTS",
+    "Emergency",
+    "EmergencySeverity",
+    "EmergencyStatus",
+    "EmergencyType",
+    "UnitsRequired",
+    # Dispatch
+    "Dispatch",
+    "DispatchedUnit",
+    "VehicleStatusSnapshot",
 ]

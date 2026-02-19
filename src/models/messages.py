@@ -21,12 +21,16 @@ class Message(BaseModel):
         description="Unique message identifier",
     )
     message_type: MessageType
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message timestamp")
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow, description="Message timestamp"
+    )
 
     source: str = Field(
         ..., description="Source identifier (vehicle_id, 'orchestrator', 'dashboard')"
     )
-    destination: str | None = Field(None, description="Target identifier (None for broadcast)")
+    destination: str | None = Field(
+        None, description="Target identifier (None for broadcast)"
+    )
 
     priority: MessagePriority = Field(
         default=MessagePriority.NORMAL, description="Delivery priority"
@@ -68,7 +72,9 @@ class HeartbeatPayload(BaseModel):
 
     vehicle_id: str
     uptime_seconds: int = Field(..., ge=0, description="Vehicle agent uptime")
-    last_telemetry_sequence: int = Field(..., description="Last telemetry sequence number sent")
+    last_telemetry_sequence: int = Field(
+        ..., description="Last telemetry sequence number sent"
+    )
     agent_version: str = Field(..., description="Vehicle agent software version")
     system_health: dict[str, Any] = Field(
         default_factory=lambda: {
@@ -202,7 +208,9 @@ class FleetStatusPayload(BaseModel):
     status_summary: dict[str, int] = Field(
         ..., description="Count of vehicles per operational status"
     )
-    active_alerts: dict[str, int] = Field(..., description="Count of alerts per severity level")
+    active_alerts: dict[str, int] = Field(
+        ..., description="Count of alerts per severity level"
+    )
     active_missions: int = Field(..., ge=0, description="Number of active missions")
     average_response_time_seconds: float | None = Field(
         None, ge=0, description="Average response time"
