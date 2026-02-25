@@ -2,15 +2,19 @@
 Data models for Project AEGIS.
 
 This package contains all Pydantic models for vehicle telemetry, alerts,
-messages, simulation configurations, emergencies, and dispatch.
+emergencies, and dispatch.
 """
 
 # Enums
-# Alert models
-from .alerts import MaintenanceRecommendation, PredictiveAlert
+from .enums import (
+    AlertSeverity,
+    FailureCategory,
+    FailureScenario,
+    OperationalStatus,
+    VehicleType,
+)
 
-# Dispatch models
-from .dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
+# Emergency models
 from .emergency import (
     EMERGENCY_UNITS_DEFAULTS,
     Emergency,
@@ -19,68 +23,26 @@ from .emergency import (
     EmergencyType,
     UnitsRequired,
 )
-from .enums import (
-    AlertSeverity,
-    CommandType,
-    FailureCategory,
-    FailureScenario,
-    MaintenanceUrgency,
-    MessagePriority,
-    MessageType,
-    OperationalStatus,
-    VehicleType,
-)
 
-# Message models
-from .messages import (
-    AlertAcknowledgmentPayload,
-    CommandPayload,
-    FleetStatusPayload,
-    HeartbeatPayload,
-    LocalDecisionPayload,
-    Message,
-)
+# Dispatch models
+from .dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
 
-# Simulation models
-from .simulation import ScenarioParameters, SimulationConfig, WeatherConditions
+# Vehicle models
+from .vehicle import Location, Vehicle
 
 # Telemetry models
 from .telemetry import VehicleTelemetry
 
-# Vehicle models
-from .vehicle import GeoLocation, VehicleIdentity, VehicleState
+# Alert models
+from .alerts import PredictiveAlert
 
 __all__ = [
     # Enums
     "AlertSeverity",
-    "CommandType",
     "FailureCategory",
     "FailureScenario",
-    "MaintenanceUrgency",
-    "MessagePriority",
-    "MessageType",
     "OperationalStatus",
     "VehicleType",
-    # Vehicle
-    "GeoLocation",
-    "VehicleIdentity",
-    "VehicleState",
-    # Telemetry
-    "VehicleTelemetry",
-    # Alerts
-    "MaintenanceRecommendation",
-    "PredictiveAlert",
-    # Messages
-    "AlertAcknowledgmentPayload",
-    "CommandPayload",
-    "FleetStatusPayload",
-    "HeartbeatPayload",
-    "LocalDecisionPayload",
-    "Message",
-    # Simulation
-    "ScenarioParameters",
-    "SimulationConfig",
-    "WeatherConditions",
     # Emergency
     "EMERGENCY_UNITS_DEFAULTS",
     "Emergency",
@@ -92,4 +54,11 @@ __all__ = [
     "Dispatch",
     "DispatchedUnit",
     "VehicleStatusSnapshot",
+    # Vehicle
+    "Location",
+    "Vehicle",
+    # Telemetry
+    "VehicleTelemetry",
+    # Alerts
+    "PredictiveAlert",
 ]

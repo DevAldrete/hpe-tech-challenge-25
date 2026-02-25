@@ -29,7 +29,7 @@ from src.models.emergency import (
     EmergencySeverity,
     UnitsRequired,
 )
-from src.models.vehicle import GeoLocation
+from src.models.vehicle import Location
 from src.orchestrator.agent import OrchestratorAgent
 
 logger = structlog.get_logger(__name__)
@@ -246,8 +246,8 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
         Returns:
             Emergency and dispatch details.
         """
-        # Build GeoLocation for the incident
-        location = GeoLocation(
+        # Build Location for the incident
+        location = Location(
             latitude=request.latitude,
             longitude=request.longitude,
             timestamp=datetime.utcnow(),

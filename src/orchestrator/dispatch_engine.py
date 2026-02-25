@@ -12,12 +12,12 @@ import structlog
 from src.models.dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
 from src.models.emergency import Emergency, EmergencyStatus
 from src.models.enums import OperationalStatus, VehicleType
-from src.models.vehicle import GeoLocation
+from src.models.vehicle import Location
 
 logger = structlog.get_logger(__name__)
 
 
-def _haversine_km(a: GeoLocation, b: GeoLocation) -> float:
+def _haversine_km(a: Location, b: Location) -> float:
     """Calculate great-circle distance between two GPS points in kilometers.
 
     Uses the Haversine formula for accurate distance on a sphere.
@@ -136,7 +136,7 @@ class DispatchEngine:
     def _get_available_candidates(
         self,
         vehicle_type: VehicleType,
-        location: GeoLocation,
+        location: Location,
     ) -> list[VehicleStatusSnapshot]:
         """Return available vehicles of a given type sorted by distance.
 

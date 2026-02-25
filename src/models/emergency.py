@@ -11,7 +11,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from src.models.vehicle import GeoLocation
+from src.models.vehicle import Location
 from src.models.enums import VehicleType
 
 
@@ -124,7 +124,7 @@ class Emergency(BaseModel):
         default=EmergencySeverity.HIGH,
         description="Severity level 1-5",
     )
-    location: GeoLocation
+    location: Location
     address: str | None = Field(None, description="Human-readable address of the incident")
     description: str = Field(..., description="Brief description of the incident")
 

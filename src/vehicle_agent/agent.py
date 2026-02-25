@@ -227,15 +227,6 @@ class VehicleAgent:
                     component=alert.component,
                 )
 
-            # 6. Publish heartbeat every 10 seconds (10 ticks at 1 Hz)
-            self.heartbeat_counter += 1
-            if self.heartbeat_counter >= 10:
-                await self.redis_client.publish_heartbeat(
-                    uptime_seconds=int(self.uptime_seconds),
-                    last_telemetry_sequence=telemetry.sequence_number,
-                )
-                self.heartbeat_counter = 0
-
         except Exception as e:
             # Log error but continue running
             logger.error(
@@ -258,7 +249,6 @@ class VehicleAgent:
             "running": self.running,
             "uptime_seconds": self.uptime_seconds,
             "redis_connected": self.redis_client.is_connected,
-            "sequence_number": self.telemetry_generator.sequence_number,
             "operational_status": self.operational_status.value,
             "current_emergency_id": self.current_emergency_id,
         }

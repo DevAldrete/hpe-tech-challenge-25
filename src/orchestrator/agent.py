@@ -15,15 +15,15 @@ import structlog
 
 from src.models.dispatch import Dispatch, VehicleStatusSnapshot
 from src.models.emergency import Emergency, EmergencyStatus
-from src.models.enums import MessageType, OperationalStatus, VehicleType
-from src.models.messages import Message
+from src.models.enums import OperationalStatus, VehicleType
+from src.models.telemetry import VehicleTelemetry
+from src.models.alerts import PredictiveAlert
 from src.orchestrator.dispatch_engine import DispatchEngine
 
 logger = structlog.get_logger(__name__)
 
 # Redis channel patterns
 TELEMETRY_PATTERN = "aegis:*:telemetry:*"
-HEARTBEAT_PATTERN = "aegis:*:heartbeat:*"
 ALERTS_PATTERN = "aegis:*:alerts:*"
 EMERGENCY_CHANNEL = "aegis:emergencies:new"
 DISPATCH_CHANNEL_PREFIX = "aegis:dispatch"
@@ -96,7 +96,6 @@ class OrchestratorAgent:
         self._pubsub = self._redis.pubsub()
         await self._pubsub.psubscribe(
             TELEMETRY_PATTERN,
-            HEARTBEAT_PATTERN,
             ALERTS_PATTERN,
             EMERGENCY_CHANNEL,
         )
@@ -150,32 +149,25 @@ class OrchestratorAgent:
             return
 
         try:
-            message = Message.model_validate_json(data)
+            if "telemetry" in channel:
+                telemetry = VehicleTelemetry.model_validate_json(data)
+                await self._handle_telemetry(telemetry)
+            elif "alerts" in channel:
+                alert = PredictiveAlert.model_validate_json(data)
+                await self._handle_alert(alert)
+            else:
+                logger.debug("unhandled_channel", channel=channel)
         except Exception as e:
             logger.warning("message_parse_error", channel=channel, error=str(e))
             return
 
-        if message.message_type == MessageType.TELEMETRY_UPDATE:
-            await self._handle_telemetry(message)
-        elif message.message_type == MessageType.HEARTBEAT:
-            await self._handle_heartbeat(message)
-        elif message.message_type == MessageType.ALERT_GENERATED:
-            await self._handle_alert(message)
-        else:
-            logger.debug(
-                "unhandled_message_type",
-                message_type=message.message_type.value,
-                source=message.source,
-            )
-
-    async def _handle_telemetry(self, message: Message) -> None:
+    async def _handle_telemetry(self, telemetry: VehicleTelemetry) -> None:
         """Update fleet state from a telemetry message.
 
         Args:
-            message: Telemetry Message envelope from a vehicle.
+            telemetry: VehicleTelemetry payload from a vehicle.
         """
-        vehicle_id = message.source
-        telemetry_data = message.payload.get("telemetry", {})
+        vehicle_id = telemetry.vehicle_id
 
         snap = self.fleet.get(vehicle_id)
         if snap is None:
@@ -192,44 +184,34 @@ class OrchestratorAgent:
         # Update last seen timestamp
         snap.last_seen_at = datetime.utcnow()
 
-        # Update location if present
-        if "location" in telemetry_data:
-            from src.models.vehicle import GeoLocation
+        # Update location
+        from src.models.vehicle import Location
 
-            try:
-                snap.location = GeoLocation.model_validate(telemetry_data["location"])
-            except Exception:
-                pass  # Location parse failure is non-fatal
+        try:
+            snap.location = Location(
+                latitude=telemetry.latitude,
+                longitude=telemetry.longitude,
+                timestamp=telemetry.timestamp,
+            )
+        except Exception:
+            pass  # Location parse failure is non-fatal
 
         # Update key health metrics
-        if "battery_voltage" in telemetry_data:
-            snap.battery_voltage = float(telemetry_data["battery_voltage"])
-        if "fuel_level_percent" in telemetry_data:
-            snap.fuel_level_percent = float(telemetry_data["fuel_level_percent"])
+        snap.battery_voltage = float(telemetry.battery_voltage)
+        snap.fuel_level_percent = float(telemetry.fuel_level_percent)
 
         logger.debug("telemetry_processed", vehicle_id=vehicle_id)
 
-    async def _handle_heartbeat(self, message: Message) -> None:
-        """Update fleet state from a heartbeat message.
-
-        Args:
-            message: Heartbeat Message envelope from a vehicle.
-        """
-        vehicle_id = message.source
-        if vehicle_id in self.fleet:
-            self.fleet[vehicle_id].last_seen_at = datetime.utcnow()
-            logger.debug("heartbeat_received", vehicle_id=vehicle_id)
-
-    async def _handle_alert(self, message: Message) -> None:
+    async def _handle_alert(self, alert: PredictiveAlert) -> None:
         """Mark a vehicle as having an active alert.
 
         Args:
-            message: Alert Message envelope from a vehicle.
+            alert: PredictiveAlert payload from a vehicle.
         """
-        vehicle_id = message.source
+        vehicle_id = alert.vehicle_id
         if vehicle_id in self.fleet:
             self.fleet[vehicle_id].has_active_alert = True
-        logger.info("alert_received", vehicle_id=vehicle_id, payload=message.payload)
+        logger.info("alert_received", vehicle_id=vehicle_id, alert_id=alert.alert_id)
 
     async def process_emergency(self, emergency: Emergency) -> Dispatch:
         """Process a new emergency: run dispatch and publish assignments to Redis.

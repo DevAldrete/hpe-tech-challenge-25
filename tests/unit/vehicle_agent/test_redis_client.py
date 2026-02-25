@@ -1,14 +1,13 @@
 """Unit tests for Redis client."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.models.alerts import PredictiveAlert
 from src.models.enums import AlertSeverity, FailureCategory, VehicleType
 from src.models.telemetry import VehicleTelemetry
-from src.models.vehicle import GeoLocation
 from src.vehicle_agent.config import AgentConfig
 from src.vehicle_agent.redis_client import RedisClient
 
@@ -32,40 +31,16 @@ class TestRedisClient:
     @pytest.fixture
     def sample_telemetry(self, config: AgentConfig) -> VehicleTelemetry:
         """Create sample telemetry data."""
-        from datetime import datetime, timezone
-
-        location = GeoLocation(
-            latitude=37.7749,
-            longitude=-122.4194,
-            altitude=0.0,
-            accuracy=5.0,
-            heading=0.0,
-            speed_kmh=0.0,
-            timestamp=datetime.now(timezone.utc),
-        )
-
         return VehicleTelemetry(
             vehicle_id=config.vehicle_id,
             timestamp=datetime.now(timezone.utc),
-            sequence_number=1,
-            location=location,
+            latitude=37.7749,
+            longitude=-122.4194,
+            speed_kmh=65.0,
             odometer_km=45678.9,
             engine_temp_celsius=90.0,
-            engine_rpm=800,
-            coolant_temp_celsius=85.0,
-            oil_pressure_psi=45.0,
-            oil_temp_celsius=90.0,
-            transmission_temp_celsius=75.0,
-            throttle_position_percent=0.0,
             battery_voltage=13.8,
-            battery_current_amps=-2.0,
-            alternator_voltage=14.2,
-            battery_state_of_charge_percent=95.0,
-            battery_health_percent=92.0,
             fuel_level_percent=75.0,
-            fuel_level_liters=30.0,
-            fuel_consumption_lph=1.5,
-            brake_fluid_level_percent=100.0,
         )
 
     def test_client_initialization(self, config: AgentConfig) -> None:
@@ -307,56 +282,3 @@ class TestRedisClient:
 
             # Should not raise, just log error
             await redis_client.publish_alert(alert)
-
-    @pytest.mark.asyncio
-    async def test_publish_heartbeat_not_connected(self, redis_client: RedisClient) -> None:
-        """Test publishing heartbeat when not connected raises error."""
-        with pytest.raises(RuntimeError, match="not connected"):
-            await redis_client.publish_heartbeat(
-                uptime_seconds=100,
-                last_telemetry_sequence=42,
-                agent_version="1.0.0",
-            )
-
-    @pytest.mark.asyncio
-    async def test_publish_heartbeat_success(self, redis_client: RedisClient) -> None:
-        """Test successfully publishing heartbeat."""
-        with patch("redis.asyncio.Redis") as mock_redis:
-            mock_instance = AsyncMock()
-            mock_instance.ping = AsyncMock()
-            mock_instance.publish = AsyncMock()
-            mock_redis.return_value = mock_instance
-
-            await redis_client.connect()
-
-            await redis_client.publish_heartbeat(
-                uptime_seconds=100,
-                last_telemetry_sequence=42,
-                agent_version="1.0.0",
-            )
-
-            # Verify publish was called
-            mock_instance.publish.assert_called_once()
-
-            # Check the channel name
-            call_args = mock_instance.publish.call_args
-            channel = call_args[0][0]
-            assert channel == "aegis:fleet01:heartbeat:AMB-001"
-
-    @pytest.mark.asyncio
-    async def test_publish_heartbeat_handles_error(self, redis_client: RedisClient) -> None:
-        """Test that heartbeat publish errors are handled gracefully."""
-        with patch("redis.asyncio.Redis") as mock_redis:
-            mock_instance = AsyncMock()
-            mock_instance.ping = AsyncMock()
-            mock_instance.publish = AsyncMock(side_effect=Exception("Publish failed"))
-            mock_redis.return_value = mock_instance
-
-            await redis_client.connect()
-
-            # Should not raise, just log error
-            await redis_client.publish_heartbeat(
-                uptime_seconds=100,
-                last_telemetry_sequence=42,
-                agent_version="1.0.0",
-            )

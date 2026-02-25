@@ -10,7 +10,7 @@ import pytest
 
 from src.models.dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
 from src.models.enums import OperationalStatus, VehicleType
-from src.models.vehicle import GeoLocation
+from src.models.vehicle import Location
 
 
 # ---------------------------------------------------------------------------
@@ -19,9 +19,9 @@ from src.models.vehicle import GeoLocation
 
 
 @pytest.fixture
-def sample_location() -> GeoLocation:
-    """Provide a sample GeoLocation for dispatch tests."""
-    return GeoLocation(
+def sample_location() -> Location:
+    """Provide a sample Location for dispatch tests."""
+    return Location(
         latitude=19.4326,
         longitude=-99.1332,
         altitude=2240.0,
@@ -51,7 +51,7 @@ def sample_dispatch(sample_dispatched_unit: DispatchedUnit) -> Dispatch:
 
 
 @pytest.fixture
-def sample_vehicle_snapshot(sample_location: GeoLocation) -> VehicleStatusSnapshot:
+def sample_vehicle_snapshot(sample_location: Location) -> VehicleStatusSnapshot:
     """Provide a sample VehicleStatusSnapshot."""
     return VehicleStatusSnapshot(
         vehicle_id="AMB-001",
@@ -238,7 +238,7 @@ class TestVehicleStatusSnapshot:
         """is_available should be True when IDLE and no active alert."""
         assert sample_vehicle_snapshot.is_available is True
 
-    def test_is_available_false_when_en_route(self, sample_location: GeoLocation) -> None:
+    def test_is_available_false_when_en_route(self, sample_location: Location) -> None:
         """is_available should be False when en_route."""
         snap = VehicleStatusSnapshot(
             vehicle_id="AMB-001",
@@ -248,7 +248,7 @@ class TestVehicleStatusSnapshot:
         )
         assert snap.is_available is False
 
-    def test_is_available_false_when_has_alert(self, sample_location: GeoLocation) -> None:
+    def test_is_available_false_when_has_alert(self, sample_location: Location) -> None:
         """is_available should be False when idle but has an active alert."""
         snap = VehicleStatusSnapshot(
             vehicle_id="AMB-001",
@@ -287,7 +287,7 @@ class TestVehicleStatusSnapshot:
         )
         assert snap.location is None
 
-    def test_fuel_level_bounds(self, sample_location: GeoLocation) -> None:
+    def test_fuel_level_bounds(self, sample_location: Location) -> None:
         """fuel_level_percent should reject values outside 0-100."""
         with pytest.raises(ValueError):
             VehicleStatusSnapshot(
@@ -304,7 +304,7 @@ class TestVehicleStatusSnapshot:
                 fuel_level_percent=-1.0,
             )
 
-    def test_snapshot_with_emergency_assigned(self, sample_location: GeoLocation) -> None:
+    def test_snapshot_with_emergency_assigned(self, sample_location: Location) -> None:
         """Snapshot should correctly store current emergency ID."""
         snap = VehicleStatusSnapshot(
             vehicle_id="AMB-001",

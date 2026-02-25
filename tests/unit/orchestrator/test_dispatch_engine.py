@@ -11,7 +11,7 @@ import pytest
 from src.models.dispatch import VehicleStatusSnapshot
 from src.models.emergency import Emergency, EmergencySeverity, EmergencyType, UnitsRequired
 from src.models.enums import OperationalStatus, VehicleType
-from src.models.vehicle import GeoLocation
+from src.models.vehicle import Location
 from src.orchestrator.dispatch_engine import DispatchEngine, _haversine_km
 
 
@@ -20,9 +20,9 @@ from src.orchestrator.dispatch_engine import DispatchEngine, _haversine_km
 # ---------------------------------------------------------------------------
 
 
-def _make_location(lat: float, lon: float) -> GeoLocation:
-    """Create a GeoLocation with minimal fields."""
-    return GeoLocation(
+def _make_location(lat: float, lon: float) -> Location:
+    """Create a Location with minimal fields."""
+    return Location(
         latitude=lat,
         longitude=lon,
         timestamp=datetime(2026, 2, 10, 14, 0, 0, tzinfo=timezone.utc),
