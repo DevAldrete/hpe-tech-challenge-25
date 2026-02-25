@@ -4,8 +4,6 @@ Redis communication layer for vehicle agents.
 This module handles async pub/sub communication with Redis for telemetry streaming.
 """
 
-from typing import Any
-
 import redis.asyncio as redis
 import structlog
 

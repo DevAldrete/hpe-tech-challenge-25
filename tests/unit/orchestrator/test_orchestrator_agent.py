@@ -4,12 +4,11 @@ Unit tests for OrchestratorAgent in Project AEGIS.
 Redis is fully mocked - no running Redis server required.
 """
 
-import json
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
 
 import pytest
 
+from src.models.alerts import PredictiveAlert
 from src.models.dispatch import VehicleStatusSnapshot
 from src.models.emergency import (
     Emergency,
@@ -18,13 +17,10 @@ from src.models.emergency import (
     EmergencyType,
     UnitsRequired,
 )
-from src.models.enums import OperationalStatus, VehicleType
+from src.models.enums import AlertSeverity, FailureCategory, OperationalStatus, VehicleType
 from src.models.telemetry import VehicleTelemetry
-from src.models.alerts import PredictiveAlert
-from src.models.enums import AlertSeverity, FailureCategory
 from src.models.vehicle import Location
 from src.orchestrator.agent import OrchestratorAgent, _infer_vehicle_type
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,7 +32,7 @@ def _make_location(lat: float = 19.43, lon: float = -99.13) -> Location:
     return Location(
         latitude=lat,
         longitude=lon,
-        timestamp=datetime(2026, 2, 10, 14, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 2, 10, 14, 0, 0, tzinfo=UTC),
     )
 
 
@@ -55,7 +51,7 @@ def _make_telemetry_message(
     """Build a VehicleTelemetry model."""
     return VehicleTelemetry(
         vehicle_id=vehicle_id,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         latitude=lat,
         longitude=lon,
         speed_kmh=0.0,
@@ -179,7 +175,7 @@ class TestOrchestratorFleetState:
 
         alert_msg = PredictiveAlert(
             vehicle_id="AMB-001",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             severity=AlertSeverity.WARNING,
             category=FailureCategory.ELECTRICAL,
             component="alternator",

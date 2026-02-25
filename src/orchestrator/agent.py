@@ -6,18 +6,17 @@ telemetry via Redis, maintains the fleet state in memory, and coordinates
 emergency dispatch.
 """
 
-import asyncio
 import json
 from datetime import datetime
 
 import redis.asyncio as redis
 import structlog
 
+from src.models.alerts import PredictiveAlert
 from src.models.dispatch import Dispatch, VehicleStatusSnapshot
 from src.models.emergency import Emergency, EmergencyStatus
 from src.models.enums import OperationalStatus, VehicleType
 from src.models.telemetry import VehicleTelemetry
-from src.models.alerts import PredictiveAlert
 from src.orchestrator.dispatch_engine import DispatchEngine
 
 logger = structlog.get_logger(__name__)

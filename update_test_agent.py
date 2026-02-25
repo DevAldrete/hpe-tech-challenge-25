@@ -1,6 +1,6 @@
 import re
 
-with open("tests/unit/orchestrator/test_orchestrator_agent.py", "r") as f:
+with open("tests/unit/orchestrator/test_orchestrator_agent.py") as f:
     content = f.read()
 
 # Update imports

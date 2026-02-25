@@ -5,7 +5,7 @@ Tests cover EmergencyType, EmergencyStatus, EmergencySeverity, UnitsRequired,
 EMERGENCY_UNITS_DEFAULTS, and Emergency model validation.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -19,7 +19,6 @@ from src.models.emergency import (
 )
 from src.models.enums import VehicleType
 from src.models.vehicle import Location
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -36,7 +35,7 @@ def sample_location() -> Location:
         accuracy=10.0,
         heading=0.0,
         speed_kmh=0.0,
-        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=UTC),
     )
 
 

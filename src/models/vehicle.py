@@ -4,10 +4,11 @@ Vehicle identity and state models for Project AEGIS.
 This module contains data models for vehicle information and operational state.
 """
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from src.models.enums import OperationalStatus, VehicleType
-from datetime import datetime
 
 
 class Location(BaseModel):

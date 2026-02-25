@@ -1,6 +1,6 @@
 """Unit tests for Redis client."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -33,7 +33,7 @@ class TestRedisClient:
         """Create sample telemetry data."""
         return VehicleTelemetry(
             vehicle_id=config.vehicle_id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latitude=37.7749,
             longitude=-122.4194,
             speed_kmh=65.0,
@@ -159,7 +159,7 @@ class TestRedisClient:
         """Test publishing alert when not connected raises error."""
         alert = PredictiveAlert(
             vehicle_id="AMB-001",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             severity=AlertSeverity.WARNING,
             category=FailureCategory.ENGINE,
             component="engine",
@@ -191,7 +191,7 @@ class TestRedisClient:
 
             alert = PredictiveAlert(
                 vehicle_id="AMB-001",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 severity=AlertSeverity.WARNING,
                 category=FailureCategory.ENGINE,
                 component="engine",
@@ -230,7 +230,7 @@ class TestRedisClient:
 
             alert = PredictiveAlert(
                 vehicle_id="AMB-001",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 severity=AlertSeverity.CRITICAL,
                 category=FailureCategory.ENGINE,
                 component="engine",
@@ -264,7 +264,7 @@ class TestRedisClient:
 
             alert = PredictiveAlert(
                 vehicle_id="AMB-001",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 severity=AlertSeverity.WARNING,
                 category=FailureCategory.ENGINE,
                 component="engine",

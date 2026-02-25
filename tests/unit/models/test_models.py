@@ -1,10 +1,8 @@
-import pytest
 from datetime import datetime
 
 from src.models import (
     AlertSeverity,
     FailureCategory,
-    FailureScenario,
     Location,
     OperationalStatus,
     PredictiveAlert,

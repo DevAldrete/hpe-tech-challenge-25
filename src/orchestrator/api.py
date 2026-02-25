@@ -13,9 +13,10 @@ Exposes endpoints for:
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -24,9 +25,9 @@ from pydantic import BaseModel, Field
 from src.models.emergency import (
     EMERGENCY_UNITS_DEFAULTS,
     Emergency,
+    EmergencySeverity,
     EmergencyStatus,
     EmergencyType,
-    EmergencySeverity,
     UnitsRequired,
 )
 from src.models.vehicle import Location
@@ -155,7 +156,7 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
     ws_manager = ConnectionManager()
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         """Start orchestrator listener on app startup, stop on shutdown."""
         task = asyncio.create_task(_run_orchestrator(orchestrator))
         yield

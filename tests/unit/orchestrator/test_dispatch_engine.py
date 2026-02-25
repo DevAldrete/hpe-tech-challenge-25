@@ -4,7 +4,7 @@ Unit tests for the DispatchEngine in Project AEGIS.
 All tests use in-memory fleet state - no Redis required.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -13,7 +13,6 @@ from src.models.emergency import Emergency, EmergencySeverity, EmergencyType, Un
 from src.models.enums import OperationalStatus, VehicleType
 from src.models.vehicle import Location
 from src.orchestrator.dispatch_engine import DispatchEngine, _haversine_km
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -25,7 +24,7 @@ def _make_location(lat: float, lon: float) -> Location:
     return Location(
         latitude=lat,
         longitude=lon,
-        timestamp=datetime(2026, 2, 10, 14, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 2, 10, 14, 0, 0, tzinfo=UTC),
     )
 
 

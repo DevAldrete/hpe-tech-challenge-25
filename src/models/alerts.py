@@ -6,8 +6,8 @@ This module contains data structures for failure predictions.
 
 import uuid
 from datetime import datetime
-
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 from src.models.enums import AlertSeverity, FailureCategory

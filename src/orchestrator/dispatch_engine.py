@@ -10,7 +10,7 @@ import math
 import structlog
 
 from src.models.dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
-from src.models.emergency import Emergency, EmergencyStatus
+from src.models.emergency import Emergency
 from src.models.enums import OperationalStatus, VehicleType
 from src.models.vehicle import Location
 

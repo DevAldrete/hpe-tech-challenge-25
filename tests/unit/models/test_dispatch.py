@@ -4,14 +4,13 @@ Unit tests for dispatch models in Project AEGIS.
 Tests cover DispatchedUnit, Dispatch, and VehicleStatusSnapshot models.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from src.models.dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
 from src.models.enums import OperationalStatus, VehicleType
 from src.models.vehicle import Location
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -28,7 +27,7 @@ def sample_location() -> Location:
         accuracy=10.0,
         heading=0.0,
         speed_kmh=0.0,
-        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=UTC),
     )
 
 
@@ -93,7 +92,7 @@ class TestDispatchedUnit:
 
     def test_acknowledgment_fields(self) -> None:
         """DispatchedUnit should accept acknowledgment data."""
-        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=timezone.utc)
+        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=UTC)
         unit = DispatchedUnit(
             vehicle_id="FIRE-002",
             vehicle_type=VehicleType.FIRE_TRUCK,
@@ -158,7 +157,7 @@ class TestDispatch:
 
     def test_all_acknowledged_true_when_all_ack(self) -> None:
         """all_acknowledged should be True when all units acknowledged."""
-        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=timezone.utc)
+        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=UTC)
         dispatch = Dispatch(
             emergency_id="some-id",
             units=[

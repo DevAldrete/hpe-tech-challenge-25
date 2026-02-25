@@ -6,13 +6,11 @@ emergencies, and dispatch.
 """
 
 # Enums
-from .enums import (
-    AlertSeverity,
-    FailureCategory,
-    FailureScenario,
-    OperationalStatus,
-    VehicleType,
-)
+# Alert models
+from .alerts import PredictiveAlert
+
+# Dispatch models
+from .dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
 
 # Emergency models
 from .emergency import (
@@ -23,18 +21,19 @@ from .emergency import (
     EmergencyType,
     UnitsRequired,
 )
-
-# Dispatch models
-from .dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
-
-# Vehicle models
-from .vehicle import Location, Vehicle
+from .enums import (
+    AlertSeverity,
+    FailureCategory,
+    FailureScenario,
+    OperationalStatus,
+    VehicleType,
+)
 
 # Telemetry models
 from .telemetry import VehicleTelemetry
 
-# Alert models
-from .alerts import PredictiveAlert
+# Vehicle models
+from .vehicle import Location, Vehicle
 
 __all__ = [
     # Enums

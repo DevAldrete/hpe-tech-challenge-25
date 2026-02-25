@@ -8,8 +8,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from src.models.vehicle import Location
-
 
 class VehicleTelemetry(BaseModel):
     """High-frequency sensor data."""

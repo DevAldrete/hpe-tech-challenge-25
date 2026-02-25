@@ -4,10 +4,10 @@ Enumerations for Project AEGIS.
 This module contains all enum definitions used throughout the system.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class VehicleType(str, Enum):
+class VehicleType(StrEnum):
     """Type of emergency vehicle."""
 
     AMBULANCE = "ambulance"
@@ -15,7 +15,7 @@ class VehicleType(str, Enum):
     POLICE = "police"
 
 
-class OperationalStatus(str, Enum):
+class OperationalStatus(StrEnum):
     """Current operational status of a vehicle."""
 
     IDLE = "idle"  # At station, ready for dispatch
@@ -27,7 +27,7 @@ class OperationalStatus(str, Enum):
     OFFLINE = "offline"  # Not connected to system
 
 
-class AlertSeverity(str, Enum):
+class AlertSeverity(StrEnum):
     """Severity level of predictive alerts."""
 
     CRITICAL = "critical"  # Immediate action required
@@ -35,7 +35,7 @@ class AlertSeverity(str, Enum):
     INFO = "info"  # Informational only
 
 
-class FailureCategory(str, Enum):
+class FailureCategory(StrEnum):
     """Category of vehicle component failure."""
 
     ENGINE = "engine"
@@ -44,7 +44,7 @@ class FailureCategory(str, Enum):
     OTHER = "other"
 
 
-class FailureScenario(str, Enum):
+class FailureScenario(StrEnum):
     """Predefined failure modes for simulation."""
 
     ENGINE_OVERHEAT = "engine_overheat"

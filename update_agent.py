@@ -1,6 +1,6 @@
 import re
 
-with open("src/orchestrator/agent.py", "r") as f:
+with open("src/orchestrator/agent.py") as f:
     content = f.read()
 
 # Remove imports

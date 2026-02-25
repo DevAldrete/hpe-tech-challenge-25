@@ -4,7 +4,7 @@ Failure injection system for vehicle simulation.
 Modifies telemetry based on active failure scenarios to simulate realistic degradation.
 """
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from src.models.enums import FailureScenario
 from src.models.telemetry import VehicleTelemetry
