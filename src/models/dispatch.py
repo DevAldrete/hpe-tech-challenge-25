@@ -11,7 +11,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.models.enums import OperationalStatus, VehicleType
-from src.models.vehicle import GeoLocation
+from src.models.vehicle import Location
 
 
 class DispatchedUnit(BaseModel):
@@ -134,7 +134,7 @@ class VehicleStatusSnapshot(BaseModel):
     vehicle_id: str
     vehicle_type: VehicleType
     operational_status: OperationalStatus = Field(default=OperationalStatus.OFFLINE)
-    location: GeoLocation | None = Field(None, description="Last known GPS position")
+    location: Location | None = Field(None, description="Last known GPS position")
     current_emergency_id: str | None = Field(None, description="Active emergency ID if on mission")
     last_seen_at: datetime = Field(
         default_factory=datetime.utcnow,

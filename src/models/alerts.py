@@ -1,7 +1,7 @@
 """
-Predictive alert and maintenance models for Project AEGIS.
+Predictive alert models for Project AEGIS.
 
-This module contains data structures for failure predictions and maintenance recommendations.
+This module contains data structures for failure predictions.
 """
 
 import uuid
@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.models.enums import AlertSeverity, FailureCategory, MaintenanceUrgency
+from src.models.enums import AlertSeverity, FailureCategory
 
 
 class PredictiveAlert(BaseModel):
@@ -24,10 +24,7 @@ class PredictiveAlert(BaseModel):
     severity: AlertSeverity
     category: FailureCategory
 
-    component: str = Field(
-        ...,
-        description="Specific component (e.g., 'alternator', 'front_left_brake_pad')",
-    )
+    component: str = Field(..., description="Specific component (e.g., 'engine_temp')")
     failure_probability: float = Field(
         ..., ge=0, le=1, description="Probability of failure (0.0-1.0)"
     )
@@ -56,8 +53,8 @@ class PredictiveAlert(BaseModel):
 
     # Orchestrator Response
     acknowledged: bool = Field(default=False, description="Alert acknowledged by orchestrator")
-    acknowledged_by: str | None = Field(None, description="User/system that acknowledged")
-    acknowledged_at: datetime | None = Field(None, description="Timestamp of acknowledgment")
+    acknowledged_by: str | None = None
+    acknowledged_at: datetime | None = None
 
     model_config = {
         "json_schema_extra": {
@@ -82,54 +79,6 @@ class PredictiveAlert(BaseModel):
                     "increased electrical load",
                 ],
                 "model_version": "1.0.0",
-            }
-        }
-    }
-
-
-class MaintenanceRecommendation(BaseModel):
-    """Actionable maintenance advice generated from alerts."""
-
-    recommendation_id: str = Field(
-        default_factory=lambda: str(uuid.uuid4()),
-        description="Unique recommendation identifier",
-    )
-    vehicle_id: str
-    timestamp: datetime
-    urgency: MaintenanceUrgency
-
-    component: str = Field(..., description="Component requiring maintenance")
-    issue_description: str = Field(..., description="Detailed issue description")
-    recommended_action: str = Field(..., description="Recommended maintenance action")
-
-    # Resource Estimates
-    estimated_downtime_hours: float = Field(..., ge=0, description="Expected vehicle downtime")
-    parts_needed: list[str] = Field(default_factory=list, description="Required replacement parts")
-    estimated_labor_hours: float = Field(..., ge=0, description="Estimated labor time")
-    estimated_cost_usd: float | None = Field(None, ge=0, description="Estimated cost in USD")
-
-    # Deferral Options
-    can_defer: bool = Field(..., description="Whether maintenance can be postponed")
-    deferral_risk: str | None = Field(
-        None, description="Risk description if maintenance is deferred"
-    )
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "recommendation_id": "rec-550e8400-e29b-41d4-a716-446655440000",
-                "vehicle_id": "AMB-001",
-                "timestamp": "2026-02-10T14:32:20.000Z",
-                "urgency": "urgent",
-                "component": "alternator",
-                "issue_description": "Alternator output voltage declining, bearing wear detected",
-                "recommended_action": "Replace alternator assembly",
-                "estimated_downtime_hours": 2.5,
-                "parts_needed": ["Alternator Assembly 14V 200A", "Serpentine Belt"],
-                "estimated_labor_hours": 2.0,
-                "estimated_cost_usd": 450.00,
-                "can_defer": True,
-                "deferral_risk": "Risk of complete electrical failure within 24 hours",
             }
         }
     }

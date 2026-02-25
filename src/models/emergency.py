@@ -7,15 +7,15 @@ and managed by the orchestrator for dispatch coordination.
 
 import uuid
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 
 from pydantic import BaseModel, Field
 
-from src.models.vehicle import GeoLocation
 from src.models.enums import VehicleType
+from src.models.vehicle import Location
 
 
-class EmergencyType(str, Enum):
+class EmergencyType(StrEnum):
     """Type of emergency incident."""
 
     MEDICAL = "medical"  # Heart attack, trauma, etc.
@@ -27,7 +27,7 @@ class EmergencyType(str, Enum):
     NATURAL_DISASTER = "natural_disaster"  # Flood, earthquake, storm
 
 
-class EmergencyStatus(str, Enum):
+class EmergencyStatus(StrEnum):
     """Lifecycle status of an emergency event."""
 
     PENDING = "pending"  # Received, awaiting dispatch
@@ -124,7 +124,7 @@ class Emergency(BaseModel):
         default=EmergencySeverity.HIGH,
         description="Severity level 1-5",
     )
-    location: GeoLocation
+    location: Location
     address: str | None = Field(None, description="Human-readable address of the incident")
     description: str = Field(..., description="Brief description of the incident")
 

@@ -4,7 +4,7 @@ Anomaly detection system for vehicle telemetry.
 Uses rule-based thresholds to detect failures and generate predictive alerts.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from src.models.alerts import PredictiveAlert
 from src.models.enums import AlertSeverity, FailureCategory
@@ -37,10 +37,8 @@ class AnomalyDetector:
 
         # Check all failure conditions
         alerts.extend(self._check_engine_temp(telemetry))
-        alerts.extend(self._check_alternator(telemetry))
         alerts.extend(self._check_battery(telemetry))
-        alerts.extend(self._check_brake_pads(telemetry))
-        alerts.extend(self._check_tire_pressure(telemetry))
+        alerts.extend(self._check_fuel(telemetry))
 
         return alerts
 
@@ -59,7 +57,7 @@ class AnomalyDetector:
             alerts.append(
                 PredictiveAlert(
                     vehicle_id=self.vehicle_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     severity=AlertSeverity.CRITICAL,
                     category=FailureCategory.ENGINE,
                     component="engine",
@@ -73,13 +71,9 @@ class AnomalyDetector:
                     recommended_action="STOP IMMEDIATELY - Engine damage imminent. Activate limp mode.",
                     contributing_factors=[
                         f"engine_temp_celsius={temp:.1f}°C (critical threshold 120°C)",
-                        f"coolant_temp={telemetry.coolant_temp_celsius:.1f}°C",
-                        f"rpm={telemetry.engine_rpm}",
                     ],
                     related_telemetry={
                         "engine_temp_celsius": temp,
-                        "coolant_temp_celsius": telemetry.coolant_temp_celsius,
-                        "engine_rpm": telemetry.engine_rpm,
                     },
                 )
             )
@@ -87,7 +81,7 @@ class AnomalyDetector:
             alerts.append(
                 PredictiveAlert(
                     vehicle_id=self.vehicle_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     severity=AlertSeverity.WARNING,
                     category=FailureCategory.ENGINE,
                     component="engine",
@@ -98,82 +92,12 @@ class AnomalyDetector:
                     predicted_failure_likely_hours=4.0,
                     can_complete_current_mission=True,
                     safe_to_operate=True,
-                    recommended_action="Reduce RPM and monitor temperature. Schedule inspection within 4 hours.",
+                    recommended_action="Monitor engine temperature closely. Schedule inspection.",
                     contributing_factors=[
                         f"engine_temp_celsius={temp:.1f}°C (warning threshold 105°C)",
-                        f"coolant_temp={telemetry.coolant_temp_celsius:.1f}°C",
                     ],
                     related_telemetry={
                         "engine_temp_celsius": temp,
-                        "coolant_temp_celsius": telemetry.coolant_temp_celsius,
-                    },
-                )
-            )
-
-        return alerts
-
-    def _check_alternator(self, telemetry: VehicleTelemetry) -> list[PredictiveAlert]:
-        """
-        Check alternator output voltage.
-
-        Thresholds from SIMULATION.md:
-        - WARNING: < 13.5V (not charging properly)
-        - CRITICAL: < 13.0V (battery discharging)
-        """
-        alerts: list[PredictiveAlert] = []
-        voltage = telemetry.alternator_voltage
-
-        if voltage < 13.0:
-            alerts.append(
-                PredictiveAlert(
-                    vehicle_id=self.vehicle_id,
-                    timestamp=datetime.utcnow(),
-                    severity=AlertSeverity.CRITICAL,
-                    category=FailureCategory.ELECTRICAL,
-                    component="alternator",
-                    failure_probability=0.85,
-                    confidence=0.90,
-                    predicted_failure_min_hours=1.0,
-                    predicted_failure_max_hours=4.0,
-                    predicted_failure_likely_hours=2.0,
-                    can_complete_current_mission=True,
-                    safe_to_operate=True,
-                    recommended_action="Alternator not charging - Battery will drain. Replace alternator within 2 hours.",
-                    contributing_factors=[
-                        f"alternator_voltage={voltage:.2f}V (critical threshold 13.0V)",
-                        f"battery_soc={telemetry.battery_state_of_charge_percent:.1f}%",
-                        f"battery_voltage={telemetry.battery_voltage:.2f}V",
-                    ],
-                    related_telemetry={
-                        "alternator_voltage": voltage,
-                        "battery_state_of_charge_percent": telemetry.battery_state_of_charge_percent,
-                        "battery_voltage": telemetry.battery_voltage,
-                    },
-                )
-            )
-        elif voltage < 13.5:
-            alerts.append(
-                PredictiveAlert(
-                    vehicle_id=self.vehicle_id,
-                    timestamp=datetime.utcnow(),
-                    severity=AlertSeverity.WARNING,
-                    category=FailureCategory.ELECTRICAL,
-                    component="alternator",
-                    failure_probability=0.65,
-                    confidence=0.85,
-                    predicted_failure_min_hours=8.0,
-                    predicted_failure_max_hours=24.0,
-                    predicted_failure_likely_hours=12.0,
-                    can_complete_current_mission=True,
-                    safe_to_operate=True,
-                    recommended_action="Alternator output low - Schedule inspection within 12 hours.",
-                    contributing_factors=[
-                        f"alternator_voltage={voltage:.2f}V (warning threshold 13.5V)",
-                        f"battery_soc={telemetry.battery_state_of_charge_percent:.1f}%",
-                    ],
-                    related_telemetry={
-                        "alternator_voltage": voltage,
-                        "battery_state_of_charge_percent": telemetry.battery_state_of_charge_percent,
                     },
                 )
             )
@@ -182,193 +106,124 @@ class AnomalyDetector:
 
     def _check_battery(self, telemetry: VehicleTelemetry) -> list[PredictiveAlert]:
         """
-        Check battery state of charge.
+        Check battery voltage.
 
-        Thresholds from SIMULATION.md:
-        - WARNING: < 40%
-        - CRITICAL: < 20%
+        Thresholds:
+        - WARNING: < 12.0V
+        - CRITICAL: < 11.5V
         """
         alerts: list[PredictiveAlert] = []
-        soc = telemetry.battery_state_of_charge_percent
+        volts = telemetry.battery_voltage
 
-        if soc < 20.0:
+        if volts < 11.5:
             alerts.append(
                 PredictiveAlert(
                     vehicle_id=self.vehicle_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     severity=AlertSeverity.CRITICAL,
                     category=FailureCategory.ELECTRICAL,
                     component="battery",
-                    failure_probability=0.90,
-                    confidence=0.95,
-                    predicted_failure_min_hours=0.5,
-                    predicted_failure_max_hours=2.0,
-                    predicted_failure_likely_hours=1.0,
+                    failure_probability=0.95,
+                    confidence=0.98,
+                    predicted_failure_min_hours=0.1,
+                    predicted_failure_max_hours=1.0,
+                    predicted_failure_likely_hours=0.5,
                     can_complete_current_mission=False,
                     safe_to_operate=False,
-                    recommended_action="Battery critically low - Vehicle may shut down. Return to base immediately.",
+                    recommended_action="STOP IMMEDIATELY - Critical electrical failure.",
                     contributing_factors=[
-                        f"battery_soc={soc:.1f}% (critical threshold 20%)",
-                        f"battery_voltage={telemetry.battery_voltage:.2f}V",
-                        f"alternator_voltage={telemetry.alternator_voltage:.2f}V",
+                        f"battery_voltage={volts:.1f}V (critical threshold 11.5V)",
                     ],
                     related_telemetry={
-                        "battery_state_of_charge_percent": soc,
-                        "battery_voltage": telemetry.battery_voltage,
-                        "alternator_voltage": telemetry.alternator_voltage,
+                        "battery_voltage": volts,
                     },
                 )
             )
-        elif soc < 40.0:
+        elif volts < 12.0:
             alerts.append(
                 PredictiveAlert(
                     vehicle_id=self.vehicle_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     severity=AlertSeverity.WARNING,
                     category=FailureCategory.ELECTRICAL,
                     component="battery",
-                    failure_probability=0.50,
-                    confidence=0.80,
-                    predicted_failure_min_hours=2.0,
-                    predicted_failure_max_hours=6.0,
-                    predicted_failure_likely_hours=4.0,
+                    failure_probability=0.65,
+                    confidence=0.85,
+                    predicted_failure_min_hours=1.0,
+                    predicted_failure_max_hours=4.0,
+                    predicted_failure_likely_hours=2.0,
                     can_complete_current_mission=True,
                     safe_to_operate=True,
-                    recommended_action="Battery charge low - Check charging system and battery health.",
+                    recommended_action="Monitor electrical system. Check alternator.",
                     contributing_factors=[
-                        f"battery_soc={soc:.1f}% (warning threshold 40%)",
-                        f"alternator_voltage={telemetry.alternator_voltage:.2f}V",
+                        f"battery_voltage={volts:.1f}V (warning threshold 12.0V)",
                     ],
                     related_telemetry={
-                        "battery_state_of_charge_percent": soc,
-                        "battery_voltage": telemetry.battery_voltage,
-                        "alternator_voltage": telemetry.alternator_voltage,
+                        "battery_voltage": volts,
                     },
                 )
             )
 
         return alerts
 
-    def _check_brake_pads(self, telemetry: VehicleTelemetry) -> list[PredictiveAlert]:
+    def _check_fuel(self, telemetry: VehicleTelemetry) -> list[PredictiveAlert]:
         """
-        Check brake pad thickness.
+        Check fuel level.
 
-        Thresholds from SIMULATION.md:
-        - WARNING: < 3.0mm
-        - CRITICAL: < 1.5mm
-        """
-        alerts: list[PredictiveAlert] = []
-
-        # Check all four brake pads
-        for location, thickness in telemetry.brake_pad_thickness_mm.items():
-            if thickness < 1.5:
-                alerts.append(
-                    PredictiveAlert(
-                        vehicle_id=self.vehicle_id,
-                        timestamp=datetime.utcnow(),
-                        severity=AlertSeverity.CRITICAL,
-                        category=FailureCategory.BRAKES,
-                        component=f"brake_pad_{location}",
-                        failure_probability=0.95,
-                        confidence=0.98,
-                        predicted_failure_min_hours=0.0,
-                        predicted_failure_max_hours=1.0,
-                        predicted_failure_likely_hours=0.5,
-                        can_complete_current_mission=False,
-                        safe_to_operate=False,
-                        recommended_action=f"CRITICAL: {location} brake pad at {thickness:.1f}mm - Replace immediately (metal-on-metal imminent).",
-                        contributing_factors=[
-                            f"brake_pad_{location}={thickness:.1f}mm (critical threshold 1.5mm)"
-                        ],
-                        related_telemetry={
-                            f"brake_pad_{location}_mm": thickness,
-                        },
-                    )
-                )
-            elif thickness < 3.0:
-                alerts.append(
-                    PredictiveAlert(
-                        vehicle_id=self.vehicle_id,
-                        timestamp=datetime.utcnow(),
-                        severity=AlertSeverity.WARNING,
-                        category=FailureCategory.BRAKES,
-                        component=f"brake_pad_{location}",
-                        failure_probability=0.60,
-                        confidence=0.90,
-                        predicted_failure_min_hours=24.0,
-                        predicted_failure_max_hours=72.0,
-                        predicted_failure_likely_hours=48.0,
-                        can_complete_current_mission=True,
-                        safe_to_operate=True,
-                        recommended_action=f"{location} brake pad at {thickness:.1f}mm - Schedule replacement within 48 hours.",
-                        contributing_factors=[
-                            f"brake_pad_{location}={thickness:.1f}mm (warning threshold 3.0mm)"
-                        ],
-                        related_telemetry={f"brake_pad_{location}_mm": thickness},
-                    )
-                )
-
-        return alerts
-
-    def _check_tire_pressure(
-        self, telemetry: VehicleTelemetry
-    ) -> list[PredictiveAlert]:
-        """
-        Check tire pressures.
-
-        Thresholds from SIMULATION.md:
-        - WARNING: < 60 psi
-        - CRITICAL: < 40 psi
+        Thresholds:
+        - WARNING: < 15%
+        - CRITICAL: < 5%
         """
         alerts: list[PredictiveAlert] = []
+        fuel = telemetry.fuel_level_percent
 
-        # Check all four tires
-        for location, pressure in telemetry.tire_pressure_psi.items():
-            if pressure < 40.0:
-                alerts.append(
-                    PredictiveAlert(
-                        vehicle_id=self.vehicle_id,
-                        timestamp=datetime.utcnow(),
-                        severity=AlertSeverity.CRITICAL,
-                        category=FailureCategory.TIRES,
-                        component=f"tire_{location}",
-                        failure_probability=0.90,
-                        confidence=0.95,
-                        predicted_failure_min_hours=0.0,
-                        predicted_failure_max_hours=0.5,
-                        predicted_failure_likely_hours=0.25,
-                        can_complete_current_mission=False,
-                        safe_to_operate=False,
-                        recommended_action=f"CRITICAL: {location} tire at {pressure:.1f} psi - Stop and replace immediately.",
-                        contributing_factors=[
-                            f"tire_pressure_{location}={pressure:.1f} psi (critical threshold 40 psi)"
-                        ],
-                        related_telemetry={
-                            f"tire_pressure_{location}_psi": pressure,
-                        },
-                    )
+        if fuel < 5.0:
+            alerts.append(
+                PredictiveAlert(
+                    vehicle_id=self.vehicle_id,
+                    timestamp=datetime.now(UTC),
+                    severity=AlertSeverity.CRITICAL,
+                    category=FailureCategory.FUEL,
+                    component="fuel",
+                    failure_probability=0.99,
+                    confidence=0.99,
+                    predicted_failure_min_hours=0.1,
+                    predicted_failure_max_hours=0.5,
+                    predicted_failure_likely_hours=0.2,
+                    can_complete_current_mission=False,
+                    safe_to_operate=False,
+                    recommended_action="REFUEL IMMEDIATELY - Vehicle will stop soon.",
+                    contributing_factors=[
+                        f"fuel_level_percent={fuel:.1f}% (critical threshold 5%)",
+                    ],
+                    related_telemetry={
+                        "fuel_level_percent": fuel,
+                    },
                 )
-            elif pressure < 60.0:
-                alerts.append(
-                    PredictiveAlert(
-                        vehicle_id=self.vehicle_id,
-                        timestamp=datetime.utcnow(),
-                        severity=AlertSeverity.WARNING,
-                        category=FailureCategory.TIRES,
-                        component=f"tire_{location}",
-                        failure_probability=0.50,
-                        confidence=0.85,
-                        predicted_failure_min_hours=1.0,
-                        predicted_failure_max_hours=4.0,
-                        predicted_failure_likely_hours=2.0,
-                        can_complete_current_mission=True,
-                        safe_to_operate=True,
-                        recommended_action=f"{location} tire pressure low at {pressure:.1f} psi - Inspect for leak and refill.",
-                        contributing_factors=[
-                            f"tire_pressure_{location}={pressure:.1f} psi (warning threshold 60 psi)"
-                        ],
-                        related_telemetry={f"tire_pressure_{location}_psi": pressure},
-                    )
+            )
+        elif fuel < 15.0:
+            alerts.append(
+                PredictiveAlert(
+                    vehicle_id=self.vehicle_id,
+                    timestamp=datetime.now(UTC),
+                    severity=AlertSeverity.WARNING,
+                    category=FailureCategory.FUEL,
+                    component="fuel",
+                    failure_probability=0.80,
+                    confidence=0.90,
+                    predicted_failure_min_hours=0.5,
+                    predicted_failure_max_hours=2.0,
+                    predicted_failure_likely_hours=1.0,
+                    can_complete_current_mission=True,
+                    safe_to_operate=True,
+                    recommended_action="Refuel soon. Low fuel level warning.",
+                    contributing_factors=[
+                        f"fuel_level_percent={fuel:.1f}% (warning threshold 15%)",
+                    ],
+                    related_telemetry={
+                        "fuel_level_percent": fuel,
+                    },
                 )
+            )
 
         return alerts

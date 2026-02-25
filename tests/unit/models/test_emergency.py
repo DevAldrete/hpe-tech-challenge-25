@@ -5,7 +5,7 @@ Tests cover EmergencyType, EmergencyStatus, EmergencySeverity, UnitsRequired,
 EMERGENCY_UNITS_DEFAULTS, and Emergency model validation.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -18,8 +18,7 @@ from src.models.emergency import (
     UnitsRequired,
 )
 from src.models.enums import VehicleType
-from src.models.vehicle import GeoLocation
-
+from src.models.vehicle import Location
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -27,21 +26,21 @@ from src.models.vehicle import GeoLocation
 
 
 @pytest.fixture
-def sample_location() -> GeoLocation:
-    """Provide a sample GeoLocation for emergency tests."""
-    return GeoLocation(
+def sample_location() -> Location:
+    """Provide a sample Location for emergency tests."""
+    return Location(
         latitude=19.4326,
         longitude=-99.1332,
         altitude=2240.0,
         accuracy=10.0,
         heading=0.0,
         speed_kmh=0.0,
-        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=UTC),
     )
 
 
 @pytest.fixture
-def sample_emergency(sample_location: GeoLocation) -> Emergency:
+def sample_emergency(sample_location: Location) -> Emergency:
     """Provide a sample Emergency for testing."""
     return Emergency(
         emergency_type=EmergencyType.MEDICAL,
@@ -234,7 +233,7 @@ class TestEmergency:
         assert len(sample_emergency.emergency_id) == 36
         assert sample_emergency.emergency_id.count("-") == 4
 
-    def test_emergency_default_status_is_pending(self, sample_location: GeoLocation) -> None:
+    def test_emergency_default_status_is_pending(self, sample_location: Location) -> None:
         """Default status for a new emergency should be PENDING."""
         e = Emergency(
             emergency_type=EmergencyType.FIRE,
@@ -243,7 +242,7 @@ class TestEmergency:
         )
         assert e.status == EmergencyStatus.PENDING
 
-    def test_emergency_default_severity_is_high(self, sample_location: GeoLocation) -> None:
+    def test_emergency_default_severity_is_high(self, sample_location: Location) -> None:
         """Default severity should be HIGH."""
         e = Emergency(
             emergency_type=EmergencyType.ACCIDENT,
@@ -270,13 +269,13 @@ class TestEmergency:
         assert sample_emergency.notes == []
 
     def test_emergency_location_stored(
-        self, sample_emergency: Emergency, sample_location: GeoLocation
+        self, sample_emergency: Emergency, sample_location: Location
     ) -> None:
         """Location should be stored correctly."""
         assert sample_emergency.location.latitude == sample_location.latitude
         assert sample_emergency.location.longitude == sample_location.longitude
 
-    def test_emergency_description_required(self, sample_location: GeoLocation) -> None:
+    def test_emergency_description_required(self, sample_location: Location) -> None:
         """description is required and should raise if missing."""
         with pytest.raises(ValueError):
             Emergency(  # type: ignore[call-arg]
@@ -300,7 +299,7 @@ class TestEmergency:
         assert restored.emergency_type == sample_emergency.emergency_type
         assert restored.severity == sample_emergency.severity
 
-    def test_two_emergencies_have_different_ids(self, sample_location: GeoLocation) -> None:
+    def test_two_emergencies_have_different_ids(self, sample_location: Location) -> None:
         """Each Emergency instance should get a unique ID."""
         e1 = Emergency(
             emergency_type=EmergencyType.MEDICAL,
@@ -314,7 +313,7 @@ class TestEmergency:
         )
         assert e1.emergency_id != e2.emergency_id
 
-    def test_emergency_with_optional_address(self, sample_location: GeoLocation) -> None:
+    def test_emergency_with_optional_address(self, sample_location: Location) -> None:
         """Emergency can include an optional address string."""
         e = Emergency(
             emergency_type=EmergencyType.CRIME,
@@ -324,7 +323,7 @@ class TestEmergency:
         )
         assert e.address == "Calle Madero 42, CDMX"
 
-    def test_emergency_with_custom_units_required(self, sample_location: GeoLocation) -> None:
+    def test_emergency_with_custom_units_required(self, sample_location: Location) -> None:
         """UnitsRequired should be stored and accessible."""
         ur = UnitsRequired(ambulances=2, fire_trucks=1)
         e = Emergency(

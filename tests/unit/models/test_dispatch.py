@@ -4,14 +4,13 @@ Unit tests for dispatch models in Project AEGIS.
 Tests cover DispatchedUnit, Dispatch, and VehicleStatusSnapshot models.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from src.models.dispatch import Dispatch, DispatchedUnit, VehicleStatusSnapshot
 from src.models.enums import OperationalStatus, VehicleType
-from src.models.vehicle import GeoLocation
-
+from src.models.vehicle import Location
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -19,16 +18,16 @@ from src.models.vehicle import GeoLocation
 
 
 @pytest.fixture
-def sample_location() -> GeoLocation:
-    """Provide a sample GeoLocation for dispatch tests."""
-    return GeoLocation(
+def sample_location() -> Location:
+    """Provide a sample Location for dispatch tests."""
+    return Location(
         latitude=19.4326,
         longitude=-99.1332,
         altitude=2240.0,
         accuracy=10.0,
         heading=0.0,
         speed_kmh=0.0,
-        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 2, 10, 14, 32, 1, tzinfo=UTC),
     )
 
 
@@ -51,7 +50,7 @@ def sample_dispatch(sample_dispatched_unit: DispatchedUnit) -> Dispatch:
 
 
 @pytest.fixture
-def sample_vehicle_snapshot(sample_location: GeoLocation) -> VehicleStatusSnapshot:
+def sample_vehicle_snapshot(sample_location: Location) -> VehicleStatusSnapshot:
     """Provide a sample VehicleStatusSnapshot."""
     return VehicleStatusSnapshot(
         vehicle_id="AMB-001",
@@ -93,7 +92,7 @@ class TestDispatchedUnit:
 
     def test_acknowledgment_fields(self) -> None:
         """DispatchedUnit should accept acknowledgment data."""
-        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=timezone.utc)
+        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=UTC)
         unit = DispatchedUnit(
             vehicle_id="FIRE-002",
             vehicle_type=VehicleType.FIRE_TRUCK,
@@ -158,7 +157,7 @@ class TestDispatch:
 
     def test_all_acknowledged_true_when_all_ack(self) -> None:
         """all_acknowledged should be True when all units acknowledged."""
-        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=timezone.utc)
+        ts = datetime(2026, 2, 10, 14, 32, 10, tzinfo=UTC)
         dispatch = Dispatch(
             emergency_id="some-id",
             units=[
@@ -238,7 +237,7 @@ class TestVehicleStatusSnapshot:
         """is_available should be True when IDLE and no active alert."""
         assert sample_vehicle_snapshot.is_available is True
 
-    def test_is_available_false_when_en_route(self, sample_location: GeoLocation) -> None:
+    def test_is_available_false_when_en_route(self, sample_location: Location) -> None:
         """is_available should be False when en_route."""
         snap = VehicleStatusSnapshot(
             vehicle_id="AMB-001",
@@ -248,7 +247,7 @@ class TestVehicleStatusSnapshot:
         )
         assert snap.is_available is False
 
-    def test_is_available_false_when_has_alert(self, sample_location: GeoLocation) -> None:
+    def test_is_available_false_when_has_alert(self, sample_location: Location) -> None:
         """is_available should be False when idle but has an active alert."""
         snap = VehicleStatusSnapshot(
             vehicle_id="AMB-001",
@@ -287,7 +286,7 @@ class TestVehicleStatusSnapshot:
         )
         assert snap.location is None
 
-    def test_fuel_level_bounds(self, sample_location: GeoLocation) -> None:
+    def test_fuel_level_bounds(self, sample_location: Location) -> None:
         """fuel_level_percent should reject values outside 0-100."""
         with pytest.raises(ValueError):
             VehicleStatusSnapshot(
@@ -304,7 +303,7 @@ class TestVehicleStatusSnapshot:
                 fuel_level_percent=-1.0,
             )
 
-    def test_snapshot_with_emergency_assigned(self, sample_location: GeoLocation) -> None:
+    def test_snapshot_with_emergency_assigned(self, sample_location: Location) -> None:
         """Snapshot should correctly store current emergency ID."""
         snap = VehicleStatusSnapshot(
             vehicle_id="AMB-001",

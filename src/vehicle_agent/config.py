@@ -32,9 +32,6 @@ class AgentConfig(BaseSettings):
     telemetry_frequency_hz: float = Field(
         default=1.0, ge=0.1, le=10.0, description="Telemetry generation frequency in Hz"
     )
-    heartbeat_interval_sec: int = Field(
-        default=10, ge=1, le=60, description="Heartbeat interval in seconds"
-    )
 
     # Initial State
     initial_status: OperationalStatus = Field(
