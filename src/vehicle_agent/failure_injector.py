@@ -76,7 +76,8 @@ class FailureInjector:
         """
         Apply engine overheat scenario.
         """
-        elapsed_minutes = self.get_time_since_activation(FailureScenario.ENGINE_OVERHEAT) / 60.0
+        elapsed_seconds = self.get_time_since_activation(FailureScenario.ENGINE_OVERHEAT)
+        elapsed_minutes = elapsed_seconds / 60.0
 
         # Temperature rise: +2°C per minute from baseline
         temp_increase = elapsed_minutes * 2.0
@@ -88,7 +89,8 @@ class FailureInjector:
         """
         Apply battery degradation scenario.
         """
-        elapsed_minutes = self.get_time_since_activation(FailureScenario.BATTERY_DEGRADATION) / 60.0
+        elapsed_seconds = self.get_time_since_activation(FailureScenario.BATTERY_DEGRADATION)
+        elapsed_minutes = elapsed_seconds / 60.0
 
         # Battery voltage drop: -0.1V per 5 minutes
         voltage_drop = (elapsed_minutes / 5.0) * 0.1
@@ -100,7 +102,8 @@ class FailureInjector:
         """
         Apply fuel leak scenario.
         """
-        elapsed_minutes = self.get_time_since_activation(FailureScenario.FUEL_LEAK) / 60.0
+        elapsed_seconds = self.get_time_since_activation(FailureScenario.FUEL_LEAK)
+        elapsed_minutes = elapsed_seconds / 60.0
 
         # Fuel leak: 5% per minute
         leak_amount = elapsed_minutes * 5.0

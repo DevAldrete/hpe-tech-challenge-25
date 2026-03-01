@@ -36,7 +36,7 @@ El sistema se simula utilizando contenedores Docker para representar los nodos d
 * **Vehicle Nodes (Agentes):** Scripts en Python que simulan la física del vehículo y generan telemetría (sintética/ABM).
 * **Message Broker (Redis/MQTT):** La "tubería" de comunicación en tiempo real.
 * **Central Brain (Orquestador):** Servicio que recibe alertas, gestiona el estado de la flota y asigna recursos.
-* **Dashboard (Frontend):** Visualización en tiempo real del estado de los gemelos y alertas predictivas.
+* **Dashboard (Streamlit):** Visualización en tiempo real del estado de los gemelos y alertas predictivas.
 
 ---
 

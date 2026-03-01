@@ -256,8 +256,8 @@ Vehicle Agents (N)
 Redis Pub/Sub
     ↓ (subscribe to all channels)
 Orchestrator (Central Brain)
-    ↓ (WebSocket stream)
-Dashboard (Frontend)
+    ↓ (REST API / Fetch)
+Dashboard (Streamlit)
 
 Vehicle Agents → Redis → Orchestrator → TimescaleDB (30+ days)
                                      ↓
@@ -390,7 +390,7 @@ fuel_level_percent: float = Field(..., ge=0, le=100)
 - **Validation**: Pydantic v2
 - **Message Broker**: Redis Pub/Sub (Phase 1), MQTT (Phase 2)
 - **Time-Series DB**: TimescaleDB (PostgreSQL extension)
-- **WebSocket**: FastAPI + uvicorn
+- **Dashboard**: Streamlit (replacing pure WebSocket/React approach)
 - **Storage**: Parquet (PyArrow) for cold storage
 - **ML**: scikit-learn, PyTorch (future)
 

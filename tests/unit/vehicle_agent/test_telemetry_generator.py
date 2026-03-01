@@ -51,12 +51,14 @@ class TestSimpleTelemetryGenerator:
     def test_telemetry_location_matches_config(
         self, config: AgentConfig, generator: SimpleTelemetryGenerator
     ) -> None:
-        """Test that location matches initial configuration."""
+        """Test that location matches initial configuration or is updated correctly."""
         telemetry = generator.generate()
 
-        assert telemetry.latitude == config.initial_latitude
-        assert telemetry.longitude == config.initial_longitude
-        assert telemetry.speed_kmh == 0.0  # Parked
+        # The location should be close to initial, but it might have moved slightly due to the new movement logic
+        assert abs(telemetry.latitude - config.initial_latitude) < 0.1
+        assert abs(telemetry.longitude - config.initial_longitude) < 0.1
+        # IDLE vehicle defaults to speed 40 for random patrol
+        assert telemetry.speed_kmh == 40.0
 
     def test_add_noise_variability(self, generator: SimpleTelemetryGenerator) -> None:
         """Test that noise produces different values."""

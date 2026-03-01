@@ -180,37 +180,25 @@
 
 ---
 
-### **Phase 6: Dashboard WebSocket API** (Week 5)
-**Goal:** Real-time data streaming to frontend
+### **Phase 6: Streamlit Dashboard** (Week 5)
+**Goal:** Real-time visualization using Streamlit instead of a heavy JS framework
 
 #### Tasks:
-- [ ] Implement `src/orchestrator/websocket_server.py`
-  - [ ] WebSocket server with FastAPI
-  - [ ] Client connection management
-  - [ ] Authentication/authorization (basic)
-- [ ] Design dashboard message protocol
-  - [ ] Fleet status updates
-  - [ ] Alert broadcasts
-  - [ ] Vehicle detail streams
-- [ ] Implement data aggregation for dashboard
-  - [ ] Reduce telemetry frequency (1 Hz → 0.2 Hz for UI)
-  - [ ] Summarize fleet statistics
-- [ ] Create `src/dashboard/websocket_client.py` (test client)
-- [ ] Build simple HTML dashboard (stretch goal)
-  - [ ] Real-time vehicle list
-  - [ ] Alert feed
-  - [ ] Basic map with vehicle markers
+- [x] Create `main.py` entrypoint for Streamlit dashboard
+- [x] Fetch data from Orchestrator API (`/fleet`, `/emergencies`)
+- [x] Build map visualization with vehicle status colors
+- [x] Build real-time metric counters
+- [x] Display active scenarios/crimes and their resolutions
+- [ ] Connect directly to Redis (optional) for ultra-low latency updates
 
 **Deliverables:**
-- WebSocket API for dashboard
-- Test client demonstrating connectivity
-- HTML dashboard (optional)
+- Streamlit application in `main.py`
+- Map and tables for real-time visualization
 
 **Success Criteria:**
-- Dashboard receives updates <1 sec latency
-- Handles 10+ concurrent connections
-- Graceful reconnection on disconnect
-- Efficient data serialization
+- Dashboard fetches and displays data correctly
+- Auto-refreshes seamlessly
+- Clear visualization of fleet status and active emergencies
 
 ---
 

@@ -32,6 +32,7 @@ from src.models.emergency import (
 )
 from src.models.vehicle import Location
 from src.orchestrator.agent import OrchestratorAgent
+from src.orchestrator.emergency_generator import EmergencyGenerator
 from src.storage.database import db
 
 logger = structlog.get_logger(__name__)
@@ -161,11 +162,21 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
         """Start orchestrator listener on app startup, stop on shutdown."""
         db.connect()
         task = asyncio.create_task(_run_orchestrator(orchestrator))
+        generator = EmergencyGenerator(orchestrator, rate_per_hour=12.0)
+        gen_task = asyncio.create_task(generator.start())
+
         yield
+
         orchestrator.running = False
+        generator.stop()
         task.cancel()
+        gen_task.cancel()
         try:
             await task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await gen_task
         except asyncio.CancelledError:
             pass
         await orchestrator.stop()

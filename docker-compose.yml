@@ -122,12 +122,13 @@ services:
       [
         "python",
         "-m",
-        "uvicorn",
-        "src.orchestrator.main:app",
+        "src.scripts.start_orchestrator",
         "--host",
         "0.0.0.0",
         "--port",
         "8000",
+        "--redis-host",
+        "redis",
       ]
     environment:
       # Application
@@ -188,6 +189,8 @@ services:
         "AMB-001",
         "--vehicle-type",
         "ambulance",
+        "--redis-host",
+        "redis",
       ]
     environment:
       AEGIS_ENV: production
@@ -229,6 +232,8 @@ services:
         "FIR-001",
         "--vehicle-type",
         "fire_truck",
+        "--redis-host",
+        "redis",
       ]
     environment:
       AEGIS_ENV: production
@@ -270,6 +275,8 @@ services:
         "AMB-002",
         "--vehicle-type",
         "ambulance",
+        "--redis-host",
+        "redis",
       ]
     environment:
       AEGIS_ENV: production
@@ -293,7 +300,101 @@ services:
           memory: 256M
 
   # -------------------------------------------------------------------------
-  # Dashboard - Web UI for Real-time Visualization
+  # Vehicle Agent 4 - Police (POL-001)
+  # -------------------------------------------------------------------------
+  vehicle-agent-4:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: aegis-vehicle-pol-001
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "-m",
+        "src.scripts.start_vehicle",
+        "--vehicle-id",
+        "POL-001",
+        "--vehicle-type",
+        "police",
+        "--redis-host",
+        "redis",
+        "--latitude",
+        "37.7690",
+        "--longitude",
+        "-122.4330",
+      ]
+    environment:
+      AEGIS_ENV: production
+      VEHICLE_ID: POL-001
+      VEHICLE_TYPE: police
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELEMETRY_INTERVAL: 5
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    networks:
+      - aegis-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 256M
+
+  # -------------------------------------------------------------------------
+  # Vehicle Agent 5 - Fire Truck (FIR-002)
+  # -------------------------------------------------------------------------
+  vehicle-agent-5:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: aegis-vehicle-fir-002
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "-m",
+        "src.scripts.start_vehicle",
+        "--vehicle-id",
+        "FIR-002",
+        "--vehicle-type",
+        "fire_truck",
+        "--redis-host",
+        "redis",
+        "--latitude",
+        "37.7920",
+        "--longitude",
+        "-122.3990",
+      ]
+    environment:
+      AEGIS_ENV: production
+      VEHICLE_ID: FIR-002
+      VEHICLE_TYPE: fire_truck
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELEMETRY_INTERVAL: 5
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    networks:
+      - aegis-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 256M
+
+  # -------------------------------------------------------------------------
+  # Dashboard - Web UI for Real-time Visualization (Streamlit)
   # -------------------------------------------------------------------------
   dashboard:
     build:
@@ -304,22 +405,18 @@ services:
     restart: unless-stopped
     command:
       [
-        "python",
-        "-m",
-        "uvicorn",
-        "src.dashboard.main:app",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "3000",
+        "streamlit",
+        "run",
+        "main.py",
+        "--server.port=8501",
+        "--server.address=0.0.0.0",
       ]
     environment:
       AEGIS_ENV: production
       ORCHESTRATOR_URL: http://orchestrator:8000
-      WS_URL: ws://orchestrator:8000/ws
       LOG_LEVEL: INFO
     ports:
-      - "3000:3000"
+      - "8501:8501"
     depends_on:
       orchestrator:
         condition: service_healthy
@@ -327,7 +424,7 @@ services:
       aegis-network:
         ipv4_address: 172.20.0.30
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3

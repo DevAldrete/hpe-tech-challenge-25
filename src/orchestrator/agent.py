@@ -27,8 +27,16 @@ logger = structlog.get_logger(__name__)
 # Redis channel patterns
 TELEMETRY_PATTERN = "aegis:*:telemetry:*"
 ALERTS_PATTERN = "aegis:*:alerts:*"
+ALERTS_CLEARED_PATTERN = "aegis:*:alerts_cleared:*"
 EMERGENCY_CHANNEL = "aegis:emergencies:new"
 DISPATCH_CHANNEL_PREFIX = "aegis:dispatch"
+
+# Emergencies that stay in DISPATCHING longer than this are cancelled (no units found).
+EMERGENCY_DISPATCH_TIMEOUT_MINUTES = 10
+# Emergencies that stay DISPATCHED/IN_PROGRESS longer than this are auto-resolved.
+EMERGENCY_MAX_DURATION_MINUTES = 30
+# How often the background sweeper runs (seconds).
+SWEEPER_INTERVAL_SECONDS = 30.0
 
 
 class OrchestratorAgent:
@@ -99,10 +107,15 @@ class OrchestratorAgent:
         await self._pubsub.psubscribe(
             TELEMETRY_PATTERN,
             ALERTS_PATTERN,
+            ALERTS_CLEARED_PATTERN,
             EMERGENCY_CHANNEL,
         )
 
         self.running = True
+        # Background sweeper for timed-out emergencies
+        self._sweeper_task: asyncio.Task | None = asyncio.create_task(  # type: ignore[type-arg]
+            self._emergency_sweeper(), name="emergency-sweeper"
+        )
         logger.info(
             "orchestrator_started",
             redis_host=self._redis_host,
@@ -112,6 +125,12 @@ class OrchestratorAgent:
     async def stop(self) -> None:
         """Gracefully stop the orchestrator and close Redis connection."""
         self.running = False
+        if hasattr(self, "_sweeper_task") and self._sweeper_task and not self._sweeper_task.done():
+            self._sweeper_task.cancel()
+            try:
+                await self._sweeper_task
+            except asyncio.CancelledError:
+                pass
         if self._pubsub:
             await self._pubsub.punsubscribe()
             await self._pubsub.close()
@@ -154,6 +173,8 @@ class OrchestratorAgent:
             if "telemetry" in channel:
                 telemetry = VehicleTelemetry.model_validate_json(data)
                 await self._handle_telemetry(telemetry)
+            elif "alerts_cleared" in channel:
+                await self._handle_alert_cleared(data)
             elif "alerts" in channel:
                 alert = PredictiveAlert.model_validate_json(data)
                 await self._handle_alert(alert)
@@ -245,6 +266,95 @@ class OrchestratorAgent:
 
         # Persist alert in the background
         asyncio.create_task(self._persist_alert(alert, vehicle_id))
+
+    async def _handle_alert_cleared(self, raw_data: str) -> None:
+        """Clear the active-alert flag for a vehicle that completed repairs.
+
+        When a vehicle publishes an ``alerts_cleared`` message after its repair
+        cycle, the orchestrator resets ``has_active_alert`` so the vehicle is
+        eligible for dispatch again. It also triggers a retry of any emergencies
+        that are still waiting for units.
+
+        Args:
+            raw_data: JSON string with at least ``{"vehicle_id": "..."}``
+        """
+        try:
+            payload = json.loads(raw_data)
+            vehicle_id = payload.get("vehicle_id", "")
+        except (json.JSONDecodeError, AttributeError):
+            logger.warning("alert_cleared_parse_error", raw=raw_data)
+            return
+
+        if vehicle_id in self.fleet:
+            self.fleet[vehicle_id].has_active_alert = False
+            self.fleet[vehicle_id].operational_status = OperationalStatus.IDLE
+            logger.info("alert_cleared", vehicle_id=vehicle_id)
+
+            # Retry any emergencies waiting for units
+            await self._retry_dispatching_emergencies()
+
+    async def _retry_dispatching_emergencies(self) -> None:
+        """Attempt to dispatch emergencies that previously had no available units.
+
+        Iterates all emergencies in DISPATCHING status and re-runs the dispatch
+        engine now that a vehicle has become available.
+        """
+        waiting = [e for e in self.emergencies.values() if e.status == EmergencyStatus.DISPATCHING]
+        for emergency in waiting:
+            logger.info(
+                "retrying_dispatch",
+                emergency_id=emergency.emergency_id,
+                emergency_type=emergency.emergency_type.value,
+            )
+            await self.process_emergency(emergency)
+
+    async def _emergency_sweeper(self) -> None:
+        """Background task that periodically cancels or resolves stale emergencies.
+
+        - DISPATCHING emergencies older than EMERGENCY_DISPATCH_TIMEOUT_MINUTES
+          are cancelled (no units ever became available in time).
+        - DISPATCHED emergencies older than EMERGENCY_MAX_DURATION_MINUTES are
+          auto-resolved (scene work is assumed complete).
+        """
+        while self.running:
+            try:
+                await asyncio.sleep(SWEEPER_INTERVAL_SECONDS)
+                now = datetime.utcnow()
+
+                for emergency in list(self.emergencies.values()):
+                    age_minutes = (now - emergency.created_at).total_seconds() / 60.0
+
+                    if emergency.status == EmergencyStatus.DISPATCHING:
+                        if age_minutes >= EMERGENCY_DISPATCH_TIMEOUT_MINUTES:
+                            emergency.status = EmergencyStatus.CANCELLED
+                            logger.warning(
+                                "emergency_cancelled_no_units",
+                                emergency_id=emergency.emergency_id,
+                                age_minutes=round(age_minutes, 1),
+                            )
+
+                    elif emergency.status in (
+                        EmergencyStatus.DISPATCHED,
+                        EmergencyStatus.IN_PROGRESS,
+                    ):
+                        if age_minutes >= EMERGENCY_MAX_DURATION_MINUTES:
+                            try:
+                                await self.resolve_emergency(emergency.emergency_id)
+                                logger.info(
+                                    "emergency_auto_resolved",
+                                    emergency_id=emergency.emergency_id,
+                                    age_minutes=round(age_minutes, 1),
+                                )
+                            except Exception as exc:
+                                logger.error(
+                                    "auto_resolve_failed",
+                                    emergency_id=emergency.emergency_id,
+                                    error=str(exc),
+                                )
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("sweeper_error", error=str(exc))
 
     async def _persist_alert(self, alert: PredictiveAlert, vehicle_id: str) -> None:
         """Background task to persist alert."""
@@ -407,7 +517,7 @@ def _infer_vehicle_type(vehicle_id: str) -> VehicleType:
     vid = vehicle_id.upper()
     if vid.startswith("AMB"):
         return VehicleType.AMBULANCE
-    if vid.startswith("FIRE"):
+    if vid.startswith("FIR") or vid.startswith("FIRE"):
         return VehicleType.FIRE_TRUCK
     if vid.startswith("POL"):
         return VehicleType.POLICE

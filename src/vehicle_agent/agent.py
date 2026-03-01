@@ -8,16 +8,22 @@ and manages the main event loop.
 import asyncio
 import json
 import signal
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
+from src.ml.predictor import Predictor
 from src.models.enums import OperationalStatus
-from src.vehicle_agent.anomaly_detector import AnomalyDetector
 from src.vehicle_agent.config import AgentConfig
 from src.vehicle_agent.failure_injector import FailureInjector
+from src.vehicle_agent.failure_scheduler import FailureScheduler
 from src.vehicle_agent.redis_client import RedisClient
 from src.vehicle_agent.telemetry_generator import SimpleTelemetryGenerator
+
+# How long (seconds) the vehicle stays in MAINTENANCE before returning to IDLE.
+# Failures resolve slowly: 3 minutes average, ±1 minute jitter applied at runtime.
+REPAIR_DURATION_SECONDS = 180.0
 
 logger = structlog.get_logger(__name__)
 
@@ -57,6 +63,10 @@ class VehicleAgent:
         self.operational_status: OperationalStatus = config.initial_status
         self.current_emergency_id: str | None = None
 
+        # Repair state: set when the vehicle enters MAINTENANCE
+        self._repair_started_at: datetime | None = None
+        self._repair_duration_seconds: float = 0.0
+
         # Internal task handle for the command listener
         self._command_listener_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
@@ -64,7 +74,10 @@ class VehicleAgent:
         self.redis_client = RedisClient(config)
         self.telemetry_generator = SimpleTelemetryGenerator(config)
         self.failure_injector = FailureInjector()
-        self.anomaly_detector = AnomalyDetector(config.vehicle_id)
+        self.failure_scheduler = FailureScheduler(
+            failure_rate_per_hour=2.0
+        )  # Average 2 failures per hour
+        self.anomaly_detector = Predictor(config.vehicle_id)
 
         logger.info(
             "agent_initialized",
@@ -197,26 +210,48 @@ class VehicleAgent:
         Execute one tick of the main loop.
 
         This method is called every tick interval and:
-        1. Generates telemetry
-        2. Applies active failure scenarios
-        3. Detects anomalies and generates alerts
-        4. Publishes telemetry and alerts to Redis
-        5. Publishes heartbeat every 10 seconds
+        1. Evaluates automatic failure scheduling
+        2. Handles maintenance / repair timer (if vehicle is in MAINTENANCE)
+        3. Generates telemetry
+        4. Applies active failure scenarios
+        5. Detects anomalies and generates alerts; triggers repair if critical
+        6. Publishes telemetry and alerts to Redis
         """
         try:
-            # 1. Generate baseline telemetry
-            telemetry = self.telemetry_generator.generate()
+            # 1. Evaluate automatic failure scheduling (skip while in repair)
+            if self.operational_status != OperationalStatus.MAINTENANCE:
+                dt_hours = 1.0 / (self.config.telemetry_frequency_hz * 3600.0)
+                self.failure_scheduler.tick(dt_hours, self.failure_injector.activate_scenario)
 
-            # 2. Apply active failure scenarios
+            # 2. Handle ongoing repair timer
+            if self.operational_status == OperationalStatus.MAINTENANCE:
+                await self._check_repair_complete()
+                # Still publish telemetry so the dashboard shows the vehicle
+                telemetry = self.telemetry_generator.generate(self.operational_status)
+                await self.redis_client.publish_telemetry(telemetry)
+                return
+
+            # 3. Generate baseline telemetry
+            telemetry = self.telemetry_generator.generate(self.operational_status)
+
+            # 4. Apply active failure scenarios
             telemetry = self.failure_injector.apply_failures(telemetry)
 
-            # 3. Detect anomalies and generate alerts
+            # 5. Detect anomalies and generate alerts
             alerts = self.anomaly_detector.analyze(telemetry)
 
-            # 4. Publish telemetry to Redis
+            # 5a. If a CRITICAL alert is raised and the vehicle has active failures,
+            #     send it to MAINTENANCE so it can be repaired and return later.
+            if alerts and self.failure_injector.active_scenarios:
+                from src.models.enums import AlertSeverity
+
+                if any(a.severity == AlertSeverity.CRITICAL for a in alerts):
+                    await self._enter_maintenance()
+
+            # 6. Publish telemetry to Redis
             await self.redis_client.publish_telemetry(telemetry)
 
-            # 5. Publish alerts if any were generated
+            # 7. Publish alerts if any were generated
             for alert in alerts:
                 await self.redis_client.publish_alert(alert)
                 logger.warning(
@@ -235,6 +270,75 @@ class VehicleAgent:
                 error=str(e),
             )
             # Don't raise - we want to keep the agent running
+
+    async def _enter_maintenance(self) -> None:
+        """Transition the vehicle to MAINTENANCE and schedule a repair.
+
+        The vehicle will stay in MAINTENANCE for REPAIR_DURATION_SECONDS (±25%
+        random jitter), after which it deactivates all failures and returns to IDLE.
+        """
+        import random
+
+        if self.operational_status == OperationalStatus.MAINTENANCE:
+            return  # already in maintenance
+
+        self.operational_status = OperationalStatus.MAINTENANCE
+        self.current_emergency_id = None
+        self.telemetry_generator.clear_target_location()
+
+        # Jitter ±25 % so not every vehicle finishes at the same time
+        jitter = random.uniform(0.75, 1.25)
+        self._repair_duration_seconds = REPAIR_DURATION_SECONDS * jitter
+        self._repair_started_at = datetime.now(UTC)
+
+        logger.warning(
+            "vehicle_entered_maintenance",
+            vehicle_id=self.config.vehicle_id,
+            repair_duration_seconds=round(self._repair_duration_seconds),
+            active_failures=[s.value for s in self.failure_injector.active_scenarios],
+        )
+
+    async def _check_repair_complete(self) -> None:
+        """Check whether the repair timer has elapsed and restore the vehicle if so."""
+        if self._repair_started_at is None:
+            return
+
+        elapsed = (datetime.now(UTC) - self._repair_started_at).total_seconds()
+        if elapsed < self._repair_duration_seconds:
+            return  # still being repaired
+
+        # Repair done — deactivate all failures and return to service
+        for scenario in list(self.failure_injector.active_scenarios.keys()):
+            self.failure_injector.deactivate_scenario(scenario)
+
+        self.operational_status = OperationalStatus.IDLE
+        self._repair_started_at = None
+        self._repair_duration_seconds = 0.0
+
+        logger.info(
+            "vehicle_repair_complete",
+            vehicle_id=self.config.vehicle_id,
+        )
+
+        # Publish a "cleared" message so the orchestrator can reset has_active_alert
+        await self._publish_alert_cleared()
+
+    async def _publish_alert_cleared(self) -> None:
+        """Publish a cleared-alert notification to the orchestrator via Redis."""
+        redis_conn = self.redis_client.redis
+        if redis_conn is None:
+            return
+        channel = f"aegis:{self.config.fleet_id}:alerts_cleared:{self.config.vehicle_id}"
+        payload = json.dumps(
+            {"vehicle_id": self.config.vehicle_id, "cleared_at": datetime.now(UTC).isoformat()}
+        )
+        try:
+            await redis_conn.publish(channel, payload)
+            logger.info("alert_cleared_published", vehicle_id=self.config.vehicle_id)
+        except Exception as e:
+            logger.error(
+                "alert_cleared_publish_failed", vehicle_id=self.config.vehicle_id, error=str(e)
+            )
 
     def get_status(self) -> dict[str, Any]:
         """
@@ -337,13 +441,32 @@ class VehicleAgent:
         if command == "dispatch":
             emergency_id = payload.get("emergency_id")
             emergency_type = payload.get("emergency_type", "unknown")
+            location = payload.get("location", {})
+            target_lat = location.get("latitude")
+            target_lon = location.get("longitude")
+
+            # Don't accept dispatches while under repair
+            if self.operational_status == OperationalStatus.MAINTENANCE:
+                logger.warning(
+                    "dispatch_ignored_in_maintenance",
+                    vehicle_id=self.config.vehicle_id,
+                    emergency_id=emergency_id,
+                )
+                return
+
             self.operational_status = OperationalStatus.EN_ROUTE
             self.current_emergency_id = emergency_id
+
+            if target_lat is not None and target_lon is not None:
+                self.telemetry_generator.set_target_location(target_lat, target_lon)
+
             logger.info(
                 "dispatch_command_received",
                 vehicle_id=self.config.vehicle_id,
                 emergency_id=emergency_id,
                 emergency_type=emergency_type,
+                target_lat=target_lat,
+                target_lon=target_lon,
                 new_status=self.operational_status.value,
             )
 
@@ -353,6 +476,7 @@ class VehicleAgent:
             if self.config.vehicle_id in released:
                 self.operational_status = OperationalStatus.IDLE
                 self.current_emergency_id = None
+                self.telemetry_generator.clear_target_location()
                 logger.info(
                     "resolve_command_received",
                     vehicle_id=self.config.vehicle_id,

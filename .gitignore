@@ -225,3 +225,8 @@ logs/
 # Data directories
 data/
 telemetry/
+
+# SKILLS
+SKILLS.md
+.agents/
+skills-lock.json
