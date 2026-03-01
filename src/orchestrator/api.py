@@ -32,6 +32,7 @@ from src.models.emergency import (
 )
 from src.models.vehicle import Location
 from src.orchestrator.agent import OrchestratorAgent
+from src.storage.database import db
 
 logger = structlog.get_logger(__name__)
 
@@ -158,6 +159,7 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         """Start orchestrator listener on app startup, stop on shutdown."""
+        db.connect()
         task = asyncio.create_task(_run_orchestrator(orchestrator))
         yield
         orchestrator.running = False
@@ -167,6 +169,7 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
         except asyncio.CancelledError:
             pass
         await orchestrator.stop()
+        await db.disconnect()
 
     async def _run_orchestrator(orch: OrchestratorAgent) -> None:
         """Run the orchestrator Redis listener loop."""

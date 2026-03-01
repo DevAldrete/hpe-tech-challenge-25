@@ -6,6 +6,7 @@ telemetry via Redis, maintains the fleet state in memory, and coordinates
 emergency dispatch.
 """
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -18,6 +19,8 @@ from src.models.emergency import Emergency, EmergencyStatus
 from src.models.enums import OperationalStatus, VehicleType
 from src.models.telemetry import VehicleTelemetry
 from src.orchestrator.dispatch_engine import DispatchEngine
+from src.storage.database import db
+from src.storage.repositories import AlertRepository, TelemetryRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -180,6 +183,9 @@ class OrchestratorAgent:
             self.fleet[vehicle_id] = snap
             logger.info("new_vehicle_registered", vehicle_id=vehicle_id, type=vehicle_type.value)
 
+            # Persist vehicle metadata
+            asyncio.create_task(self._persist_vehicle(vehicle_id, vehicle_type.value, "active"))
+
         # Update last seen timestamp
         snap.last_seen_at = datetime.utcnow()
 
@@ -201,6 +207,31 @@ class OrchestratorAgent:
 
         logger.debug("telemetry_processed", vehicle_id=vehicle_id)
 
+        # Persist telemetry in the background
+        asyncio.create_task(self._persist_telemetry(telemetry, vehicle_id))
+
+    async def _persist_vehicle(self, vehicle_id: str, vehicle_type: str, status: str) -> None:
+        """Background task to persist vehicle metadata."""
+        if db.engine is None:
+            return
+        try:
+            async with db.session() as session:
+                repo = TelemetryRepository(session)
+                await repo.upsert_vehicle(vehicle_id, vehicle_type, status)
+        except Exception as e:
+            logger.error("db_persist_vehicle_error", vehicle_id=vehicle_id, error=str(e))
+
+    async def _persist_telemetry(self, telemetry: VehicleTelemetry, vehicle_id: str) -> None:
+        """Background task to persist telemetry."""
+        if db.engine is None:
+            return
+        try:
+            async with db.session() as session:
+                repo = TelemetryRepository(session)
+                await repo.save_telemetry(telemetry, vehicle_id)
+        except Exception as e:
+            logger.error("db_persist_telemetry_error", vehicle_id=vehicle_id, error=str(e))
+
     async def _handle_alert(self, alert: PredictiveAlert) -> None:
         """Mark a vehicle as having an active alert.
 
@@ -211,6 +242,20 @@ class OrchestratorAgent:
         if vehicle_id in self.fleet:
             self.fleet[vehicle_id].has_active_alert = True
         logger.info("alert_received", vehicle_id=vehicle_id, alert_id=alert.alert_id)
+
+        # Persist alert in the background
+        asyncio.create_task(self._persist_alert(alert, vehicle_id))
+
+    async def _persist_alert(self, alert: PredictiveAlert, vehicle_id: str) -> None:
+        """Background task to persist alert."""
+        if db.engine is None:
+            return
+        try:
+            async with db.session() as session:
+                repo = AlertRepository(session)
+                await repo.save_alert(alert, vehicle_id)
+        except Exception as e:
+            logger.error("db_persist_alert_error", vehicle_id=vehicle_id, error=str(e))
 
     async def process_emergency(self, emergency: Emergency) -> Dispatch:
         """Process a new emergency: run dispatch and publish assignments to Redis.

@@ -1,274 +1,95 @@
 # Agent Development Guide - Project AEGIS
 
-**Project:** HPE GreenLake Tech Challenge - Digital Twin Emergency Vehicle System  
-**Language:** Python 3.13  
-**Package Manager:** uv  
-**Status:** POC Development Phase
+**Project:** HPE GreenLake Tech Challenge - Digital Twin
+**Language:** Python 3.13 | **Manager:** `uv` | **Status:** POC
 
----
+This guide provides crucial context, commands, and rules for AI coding agents operating in this repository. 
 
 ## 🛠️ Development Commands
 
-### Environment & Running
+### Environment & Execution
 ```bash
-# Install dependencies
-uv sync                           # All dependencies (including dev)
-uv sync --no-dev                  # Production only
-
-# Run application
+uv sync                           # Install all dependencies (including dev)
+uv sync --no-dev                  # Production dependencies only
 uv run python main.py             # Main entry point
 uv run aegis-vehicle              # Vehicle simulation
 uv run aegis-orchestrator         # Central coordinator
-uv run aegis-fleet                # Fleet simulation
 ```
 
-### Testing
+### Testing (Pytest)
+Agents must verify their work. Running a **single test** for targeted validation is highly recommended:
 ```bash
-# Basic test commands
-uv run pytest                                              # All tests with coverage
-uv run pytest tests/unit/models/test_vehicle.py           # Specific file
-uv run pytest tests/unit/models/test_vehicle.py::TestGeoLocation  # Specific class
-uv run pytest tests/unit/models/test_vehicle.py::TestGeoLocation::test_geolocation_valid_creation  # Single test
+# Running a single test (Recommended for rapid iteration):
+uv run pytest tests/unit/models/test_vehicle.py::TestGeoLocation::test_geolocation_valid_creation
 
-# Advanced options
-uv run pytest -m unit                       # Only unit tests
-uv run pytest -m integration                # Only integration tests
-uv run pytest -m "not slow"                 # Exclude slow tests
-uv run pytest -n auto                       # Parallel execution
-uv run pytest --cov-report=html             # HTML coverage report (htmlcov/)
-uv run pytest --cov=src --cov-report=term-missing  # Show missing coverage
+# Other test commands:
+uv run pytest                                     # Run all tests
+uv run pytest tests/unit/models/test_vehicle.py   # Run specific file
+uv run pytest -m unit                             # Run only unit tests
+uv run pytest -m integration                      # Run integration tests
+uv run pytest --cov=src --cov-report=term-missing # Check missing coverage
 ```
 
-### Linting & Formatting
+### Linting, Formatting & Type Checking
 ```bash
 uv run ruff format .              # Format code (auto-fix)
-uv run ruff check .               # Run linter
-uv run ruff check --fix .         # Fix auto-fixable issues
+uv run ruff check --fix .         # Lint and fix auto-fixable issues
 uv run mypy src/                  # Type checking (strict mode)
 uv run bandit -r src/             # Security scanning
 uv run pydocstyle src/            # Docstring validation (Google style)
 pre-commit run --all-files        # Run all pre-commit hooks
 ```
 
----
-
 ## 📁 Project Structure
 
-```
-src/
-├── vehicle_agent/     # Vehicle digital twin agents
-├── orchestrator/      # Central brain/coordinator
-├── models/            # Pydantic data models (validation & serialization)
-├── ml/                # Machine learning models
-├── storage/           # Database & persistence
-├── dashboard/         # Web dashboard
-├── scripts/           # CLI entry points (aegis-* commands)
-└── utils/             # Shared utilities
-
-tests/
-├── unit/              # Fast unit tests
-├── integration/       # Integration tests
-├── fixtures/          # Shared pytest fixtures
-└── conftest.py        # Pytest configuration
-```
-
----
+- `src/`: Source code modules
+  - `models/`: Pydantic data models (validation & serialization)
+  - `vehicle_agent/`: Digital twin agents
+  - `orchestrator/`: Central coordinator
+  - `ml/` & `storage/`: Machine learning & persistence
+- `tests/`: Contains `unit/`, `integration/`, and `fixtures/`
 
 ## 🎨 Code Style Guidelines
 
-### Import Order (PEP 8)
+- **Line Length:** 100 characters max.
+- **Type Hints:** Required for ALL functions/methods (`mypy` strict mode is enforced).
+- **Docstrings:** Google Style is mandatory for classes and public methods.
+- **Naming Conventions:**
+  - Classes: `PascalCase` (e.g., `VehicleDigitalTwin`)
+  - Functions/Variables: `snake_case` (e.g., `process_telemetry`)
+  - Constants: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRIES`)
+  - Private Members: `_leading_underscore` (e.g., `_validate_data`)
+- **Async/Await:** Used extensively for network, pub/sub (Redis/MQTT), and I/O.
+- **Error Handling:** Use specific, targeted exceptions. NEVER use a bare `except:`.
+
+### Imports Structure (PEP 8)
+Always group imports logically, separated by blank lines:
 ```python
 # 1. Standard library
 import os
-from typing import Optional, Dict
+from typing import Any, Dict
 
 # 2. Third-party
-import numpy as np
+import pytest
 from pydantic import BaseModel
 
 # 3. Local application
 from src.models.vehicle import VehicleIdentity
-from src.utils.telemetry import generate_telemetry
 ```
-
-### Type Hints (Required)
-```python
-def calculate_failure_probability(
-    telemetry_data: Dict[str, float],
-    threshold: float = 0.85
-) -> tuple[bool, float]:
-    """Calculate predictive failure probability.
-    
-    Args:
-        telemetry_data: Sensor readings from vehicle
-        threshold: Decision threshold for alerts
-        
-    Returns:
-        Tuple of (is_critical, probability_score)
-        
-    Raises:
-        ValueError: If telemetry_data is empty
-    """
-    pass
-```
-
-### Naming Conventions
-- **Classes:** `PascalCase` → `VehicleDigitalTwin`, `TelemetryProcessor`
-- **Functions/Methods:** `snake_case` → `process_telemetry`, `send_alert`
-- **Constants:** `UPPER_SNAKE_CASE` → `MAX_RETRY_ATTEMPTS`, `DEFAULT_TIMEOUT`
-- **Private:** `_leading_underscore` → `_validate_data`, `_internal_helper`
-- **Modules:** `lowercase` or `snake_case` → `vehicle.py`, `telemetry.py`
-
-### Docstrings (Google Style - Required)
-```python
-class VehicleDigitalTwin:
-    """Digital twin representation of an emergency vehicle.
-    
-    Simulates vehicle behavior, generates telemetry, and performs
-    predictive maintenance calculations.
-    
-    Attributes:
-        vehicle_id: Unique identifier (e.g., AMB-001)
-        vehicle_type: VehicleType enum (ambulance, fire_truck, etc.)
-        telemetry_interval: Seconds between telemetry updates
-    """
-```
-
-### Error Handling (Explicit)
-```python
-# ✅ Good: Specific exceptions
-try:
-    telemetry = await fetch_vehicle_data(vehicle_id)
-except ConnectionError as e:
-    logger.error(f"Connection failed for {vehicle_id}: {e}")
-    raise
-except TimeoutError:
-    logger.warning(f"Timeout for {vehicle_id}")
-    return None
-
-# ❌ Bad: Bare except
-try:
-    risky_operation()
-except:  # Never do this
-    pass
-```
-
-### Async/Await (I/O Operations)
-```python
-async def process_vehicle_fleet(vehicle_ids: list[str]) -> dict[str, Any]:
-    """Process telemetry for entire fleet concurrently."""
-    tasks = [fetch_and_analyze(vid) for vid in vehicle_ids]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return {vid: result for vid, result in zip(vehicle_ids, results)}
-```
-
----
-
-## 🏛️ Architecture Patterns
-
-### Vehicle Agent Pattern
-Each vehicle agent:
-1. Generates synthetic telemetry (speed, temp, vibration, etc.)
-2. Runs local anomaly detection (autonomous)
-3. Publishes via Redis/MQTT message broker
-4. Operates independently if central brain disconnects
-
-### Message Broker Communication
-```python
-# Publish telemetry
-await redis_client.publish(
-    f"vehicle:{vehicle_id}:telemetry",
-    json.dumps(telemetry_data)
-)
-
-# Subscribe to alerts
-async for message in pubsub.listen():
-    if message["type"] == "message":
-        await handle_alert(message["data"])
-```
-
----
 
 ## ✅ Testing Standards
 
-### Test Organization
-- **File naming:** `test_<module_name>.py` (mirrors source structure)
-- **Class naming:** `TestClassName` → `TestGeoLocation`, `TestVehicleTelemetry`
-- **Function naming:** `test_<what>_<condition>_<expected>` → `test_geolocation_latitude_bounds`
+- **Test Naming:**
+  - Files: `test_<module>.py`
+  - Classes: `Test<ClassName>`
+  - Functions: `test_<what>_<condition>_<expected>` (e.g., `test_geolocation_latitude_bounds`)
+- **Mocking:** Use `unittest.mock.AsyncMock` when patching async operations like `redis_client.publish`.
+- **Fixtures:** Centralize common test data in `conftest.py` or within `tests/fixtures/`.
 
-### Pytest Markers
-```python
-@pytest.mark.unit          # Fast unit tests
-@pytest.mark.integration   # Integration tests
-@pytest.mark.slow          # Long-running tests
-@pytest.mark.simulation    # Simulation tests
-```
+## 🔒 Architecture & Best Practices
 
-### Fixtures & Mocking
-```python
-@pytest.fixture
-def sample_telemetry() -> dict:
-    """Sample telemetry for testing."""
-    return {
-        "vehicle_id": "AMB-001",
-        "speed": 65.0,
-        "engine_temp": 95.5,
-        "timestamp": "2026-02-10T12:00:00Z"
-    }
-
-@pytest.mark.asyncio
-async def test_redis_publish(sample_telemetry: dict) -> None:
-    """Test telemetry publishing to Redis."""
-    with patch('redis.asyncio.Redis.publish', new_callable=AsyncMock) as mock:
-        await publish_telemetry(sample_telemetry)
-        mock.assert_called_once()
-```
-
----
-
-## 📊 Configuration Summary
-
-**pyproject.toml:**
-- Line length: 100 chars
-- Python: 3.13 (strict)
-- Type checking: mypy strict mode
-- Docstrings: Google convention
-- Coverage reports: `htmlcov/`
-
-**Pre-commit hooks:**
-- Ruff linting & formatting
-- MyPy type checking (src/ only)
-- Bandit security scanning
-- Pydocstyle validation
-- File hygiene (whitespace, EOF)
-
----
-
-## 🔒 Security & Best Practices
-
-1. **Never commit secrets** → Use `.env` files (excluded from git)
-2. **Validate all inputs** → Use Pydantic models for data validation
-3. **Type everything** → mypy strict mode enforced
-4. **Structured logging** → Use `structlog` for JSON logs
-5. **Timeout all I/O** → Network calls must have timeouts
-6. **Context managers** → Always use `with` or `async with` for resources
-
----
-
-## 🌿 Git Workflow
-
-- `main` → Stable, tested code (POC ready)
-- `release` → Integration branch for new features
-- `feature/*` → Feature branches (e.g., `feature/simulacion-motor`)
-
-**Before committing:** Ensure tests pass and code is linted.
-
----
-
-## 📚 Resources
-
-- **README:** Project overview and vision
-- **TESTING.md:** Detailed testing guidelines
-- **docs/:** Architecture documentation (DATA_ARCHITECTURE.md, SIMULATION.md, etc.)
-- **Python Version:** 3.13 (see `.python-version`)
-- **License:** GNU GPL v3.0
+1. **Message Broker Pattern:** Vehicles publish telemetry and subscribe to alerts asynchronously.
+2. **Pydantic Validation:** Always use Pydantic models to validate system inputs/outputs.
+3. **Structured Logging:** Use `structlog` for JSON logs instead of `print()`.
+4. **Timeouts:** Ensure all async I/O operations and network requests utilize appropriate timeouts.
+5. **Secrets:** Never hardcode secrets. Read them from the environment (e.g., via a `.env` file).
