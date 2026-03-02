@@ -36,7 +36,7 @@ logger = structlog.get_logger(__name__)
 )
 @click.option(
     "--vehicle-type",
-    type=click.Choice(["ambulance", "fire_truck"], case_sensitive=False),
+    type=click.Choice(["ambulance", "fire_truck", "police"], case_sensitive=False),
     required=True,
     help="Type of emergency vehicle",
 )

@@ -8,21 +8,20 @@
 # -----------------------------------------------------------------------------
 FROM python:3.13-slim AS builder
 
-# Install system dependencies and uv
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
     libpq-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh
+    && rm -rf /var/lib/apt/lists/*
 
-# Add uv to PATH
-ENV PATH="/root/.cargo/bin:$PATH"
+# Install uv directly from the official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy dependency files and README for hatchling
+COPY pyproject.toml uv.lock README.md ./
 
 # Install dependencies to a virtual environment
 RUN uv sync --no-dev
@@ -62,12 +61,14 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # Switch to non-root user
 USER aegis
 
+EXPOSE 8501
+
 # Health check (can be overridden per service)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+    CMD curl -f http://localhost:8501/_stcore/health || exit 1
 
 # Default command (override in docker-compose)
-CMD ["python", "main.py"]
+CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
 
 # -----------------------------------------------------------------------------
 # Stage 3: Development - Includes dev dependencies and tools
@@ -76,14 +77,13 @@ FROM runtime AS development
 
 USER root
 
-# Install uv for dev environment
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+# Install uv directly from the official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Copy full dependency spec
-COPY pyproject.toml uv.lock ./
+# Copy full dependency spec and README for hatchling
+COPY pyproject.toml uv.lock README.md ./
 
 # Install dev dependencies
 RUN uv sync

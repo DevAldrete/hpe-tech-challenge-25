@@ -125,7 +125,7 @@ class Emergency(BaseModel):
         description="Severity level 1-5",
     )
     location: Location
-    address: str | None = Field(None, description="Human-readable address of the incident")
+    address: str | None = Field(default=None, description="Human-readable address of the incident")
     description: str = Field(..., description="Brief description of the incident")
 
     units_required: UnitsRequired = Field(
@@ -142,8 +142,12 @@ class Emergency(BaseModel):
         default_factory=datetime.utcnow,
         description="Timestamp when emergency was registered",
     )
-    dispatched_at: datetime | None = Field(None, description="Timestamp when units were dispatched")
-    resolved_at: datetime | None = Field(None, description="Timestamp when emergency was resolved")
+    dispatched_at: datetime | None = Field(
+        default=None, description="Timestamp when units were dispatched"
+    )
+    resolved_at: datetime | None = Field(
+        default=None, description="Timestamp when emergency was resolved"
+    )
     notes: list[str] = Field(
         default_factory=list,
         description="Additional notes and status updates",
