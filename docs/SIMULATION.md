@@ -15,6 +15,14 @@ Project AEGIS uses **synthetic data generation** to simulate emergency vehicle b
 
 ---
 
+## Movement and geographic boundaries
+
+Vehicle movement is **straight-line (haversine)**: each tick advances the position by a distance along the current bearing. There is no road or routing layer.
+
+The **San Francisco bounding box** (see `src/vehicle_agent/config.py`: `SF_LAT_MIN/MAX`, `SF_LON_MIN/MAX`) is enforced for both **IDLE** and **EN_ROUTE** vehicles. When a vehicle would exit the box, its position is clamped to the boundary and its heading is reflected so the next tick keeps it inside. This ensures vehicles never leave the operating area (e.g. into the ocean). Auto-generated emergencies (orchestrator) are clamped to the same box so dispatch targets always lie within bounds.
+
+---
+
 ## 🚑 Vehicle Types & Specifications
 
 ### Ambulance (Type A: Box Ambulance)

@@ -232,11 +232,25 @@ class VehicleAgent:
                 await self._check_repair_complete()
                 # Still publish telemetry so the dashboard shows the vehicle
                 telemetry = self.telemetry_generator.generate(self.operational_status)
+                telemetry.operational_status = self.operational_status.value
                 await self.redis_client.publish_telemetry(telemetry)
                 return
 
             # 3. Generate baseline telemetry
             telemetry = self.telemetry_generator.generate(self.operational_status)
+
+            # 3a. Arrival at dispatch target: transition to ON_SCENE
+            if (
+                self.operational_status == OperationalStatus.EN_ROUTE
+                and self.current_emergency_id is not None
+                and telemetry.speed_kmh == 0.0
+            ):
+                self.operational_status = OperationalStatus.ON_SCENE
+                logger.info(
+                    "arrival_at_scene",
+                    vehicle_id=self.config.vehicle_id,
+                    emergency_id=self.current_emergency_id,
+                )
 
             # 4. Apply active failure scenarios
             telemetry = self.failure_injector.apply_failures(telemetry)
@@ -261,7 +275,8 @@ class VehicleAgent:
                 if any(a.severity == AlertSeverity.CRITICAL for a in alerts):
                     await self._enter_maintenance()
 
-            # 6. Publish telemetry to Redis
+            # 6. Publish telemetry to Redis (include status so orchestrator shows ON_SCENE)
+            telemetry.operational_status = self.operational_status.value
             await self.redis_client.publish_telemetry(telemetry)
 
             # 7. Publish alerts if any were generated

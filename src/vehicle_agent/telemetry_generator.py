@@ -180,16 +180,17 @@ class SimpleTelemetryGenerator:
         self.current_longitude = math.degrees(new_lon)
         self.heading_degrees = math.degrees(bearing)
 
-        # Keep IDLE vehicles within the San Francisco city boundary
-        if status == OperationalStatus.IDLE:
+        # Keep IDLE and EN_ROUTE vehicles within the San Francisco operating area
+        if status in (OperationalStatus.IDLE, OperationalStatus.EN_ROUTE):
             self._apply_sf_boundary()
 
         # Update odometer
         self.baselines["odometer_km"] += distance_to_move
 
     def _apply_sf_boundary(self) -> None:
-        """Reflect heading and clamp position when an IDLE vehicle crosses the SF boundary.
+        """Reflect heading and clamp position when a vehicle crosses the SF boundary.
 
+        Used for both IDLE and EN_ROUTE so vehicles never leave the operating area.
         When the vehicle exits the bounding box along the latitude axis, the
         north/south component of the heading is inverted (horizontal mirror).
         When it exits along the longitude axis, the east/west component is

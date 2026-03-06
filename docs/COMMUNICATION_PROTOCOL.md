@@ -66,9 +66,12 @@ Priority: NORMAL
       "rear_right": 80.0
     }
     // ... 35+ more telemetry fields
+    "operational_status": "on_scene"   // optional; when present, orchestrator uses it (e.g. ON_SCENE on arrival)
   }
 }
 ```
+
+Telemetry may optionally include `operational_status` (e.g. `idle`, `en_route`, `on_scene`). When present, the orchestrator updates the fleet snapshot so the dashboard shows the correct status (e.g. ON_SCENE when a vehicle reaches the dispatch target).
 
 ---
 

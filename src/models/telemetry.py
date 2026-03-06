@@ -37,6 +37,12 @@ class VehicleTelemetry(BaseModel):
         default=None, ge=0, le=30, description="Brake pad thickness in mm (None = not equipped)"
     )
 
+    # Optional status reported by vehicle so orchestrator can show ON_SCENE on arrival
+    operational_status: str | None = Field(
+        default=None,
+        description="Current operational status (idle, en_route, on_scene, etc.) when provided",
+    )
+
     model_config = {
         "json_schema_extra": {
             "example": {

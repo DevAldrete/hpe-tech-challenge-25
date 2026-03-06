@@ -258,6 +258,13 @@ class OrchestratorAgent:
             float(telemetry.brake_pad_mm) if telemetry.brake_pad_mm is not None else None
         )
 
+        # Update status from vehicle when provided (e.g. ON_SCENE on arrival)
+        if telemetry.operational_status is not None:
+            try:
+                snap.operational_status = OperationalStatus(telemetry.operational_status)
+            except ValueError:
+                pass  # Ignore unknown status strings
+
         logger.debug("telemetry_processed", vehicle_id=vehicle_id)
 
         # Buffer telemetry for batched DB writes
