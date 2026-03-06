@@ -8,11 +8,17 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from src.models.enums import VehicleType
+
 
 class VehicleTelemetry(BaseModel):
     """High-frequency sensor data."""
 
     vehicle_id: str
+    vehicle_type: VehicleType | None = Field(
+        default=None,
+        description="Vehicle type emitted by the agent (preferred over ID prefix inference)",
+    )
     timestamp: datetime
 
     # Location & Movement

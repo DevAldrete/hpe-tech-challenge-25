@@ -15,7 +15,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -129,7 +129,7 @@ class ConnectionManager:
         if not self._active:
             return
         message = json.dumps(
-            {"event": event_type, "data": data, "ts": datetime.utcnow().isoformat()}
+            {"event": event_type, "data": data, "ts": datetime.now(UTC).isoformat()}
         )
         dead: list[WebSocket] = []
         for ws in list(self._active):
@@ -190,11 +190,14 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
         """Run the orchestrator Redis listener loop."""
         try:
             await orch.start()
-            async for raw in orch._pubsub.listen():  # type: ignore[union-attr]
+            async for raw in orch._bus.subscribe_patterns(
+                "aegis:*:telemetry:*",
+                "aegis:*:alerts:*",
+                "aegis:*:alerts_cleared:*",
+                "aegis:emergencies:new",
+            ):
                 if not orch.running:
                     break
-                if raw["type"] not in ("message", "pmessage"):
-                    continue
                 await orch._handle_raw_message(raw)
         except asyncio.CancelledError:
             pass
@@ -307,7 +310,7 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
         location = Location(
             latitude=request.latitude,
             longitude=request.longitude,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
 
         # Use type-based defaults if no explicit units provided

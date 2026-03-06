@@ -8,18 +8,22 @@ and manages the main event loop.
 import asyncio
 import json
 import signal
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import structlog
 
+from src.core.messaging import MessageBus
+from src.core.time import Clock, RealClock
+from src.infrastructure.redis_bus import RedisMessageBus
 from src.ml.predictor import Predictor
+from src.models.alerts import PredictiveAlert
 from src.models.enums import OperationalStatus
+from src.models.telemetry import VehicleTelemetry
 from src.vehicle_agent.anomaly_detector import AnomalyDetector
 from src.vehicle_agent.config import AgentConfig
 from src.vehicle_agent.failure_injector import FailureInjector
 from src.vehicle_agent.failure_scheduler import FailureScheduler
-from src.vehicle_agent.redis_client import RedisClient
 from src.vehicle_agent.telemetry_generator import SimpleTelemetryGenerator
 
 # How long (seconds) the vehicle stays in MAINTENANCE before returning to IDLE.
@@ -48,7 +52,13 @@ class VehicleAgent:
         current_emergency_id: ID of the emergency the vehicle is handling, if any.
     """
 
-    def __init__(self, config: AgentConfig) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        *,
+        message_bus: MessageBus | None = None,
+        clock: Clock | None = None,
+    ) -> None:
         """
         Initialize vehicle agent.
 
@@ -56,7 +66,9 @@ class VehicleAgent:
             config: Agent configuration
         """
         self.config = config
+        self.clock = clock or RealClock()
         self.running = False
+        self._bus_connected = False
         self.uptime_seconds = 0.0
         self.heartbeat_counter = 0
 
@@ -69,11 +81,16 @@ class VehicleAgent:
         self._repair_duration_seconds: float = 0.0
 
         # Internal task handle for the command listener
-        self._command_listener_task: asyncio.Task | None = None  # type: ignore[type-arg]
+        self._command_listener_task: asyncio.Task[Any] | None = None
 
         # Initialize components
-        self.redis_client = RedisClient(config)
-        self.telemetry_generator = SimpleTelemetryGenerator(config)
+        self._bus = message_bus or RedisMessageBus(
+            host=config.redis_host,
+            port=config.redis_port,
+            password=config.redis_password,
+            db=config.redis_db,
+        )
+        self.telemetry_generator = SimpleTelemetryGenerator(config, clock=self.clock)
         self.failure_injector = FailureInjector(vehicle_type=config.vehicle_type)
         self.failure_scheduler = FailureScheduler(
             failure_rate_per_hour=2.0
@@ -106,8 +123,9 @@ class VehicleAgent:
 
         logger.info("agent_starting", vehicle_id=self.config.vehicle_id)
 
-        # Connect to Redis
-        await self.redis_client.connect()
+        # Connect to message bus
+        await self._bus.connect()
+        self._bus_connected = True
 
         self.running = True
 
@@ -136,8 +154,9 @@ class VehicleAgent:
             except asyncio.CancelledError:
                 pass
 
-        # Disconnect from Redis
-        await self.redis_client.disconnect()
+        # Disconnect from message bus
+        await self._bus.close()
+        self._bus_connected = False
 
         logger.info(
             "agent_stopped",
@@ -182,17 +201,17 @@ class VehicleAgent:
         # Main event loop
         try:
             while self.running:
-                tick_start = asyncio.get_event_loop().time()
+                tick_start = self.clock.monotonic()
 
                 # Execute one tick
                 await self._tick()
 
                 # Calculate sleep time to maintain frequency
-                tick_elapsed = asyncio.get_event_loop().time() - tick_start
+                tick_elapsed = self.clock.monotonic() - tick_start
                 sleep_time = max(0, tick_interval - tick_elapsed)
 
                 if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
+                    await self.clock.sleep(sleep_time)
 
                 # Update uptime
                 self.uptime_seconds += tick_interval
@@ -233,7 +252,7 @@ class VehicleAgent:
                 # Still publish telemetry so the dashboard shows the vehicle
                 telemetry = self.telemetry_generator.generate(self.operational_status)
                 telemetry.operational_status = self.operational_status.value
-                await self.redis_client.publish_telemetry(telemetry)
+                await self._publish_telemetry(telemetry)
                 return
 
             # 3. Generate baseline telemetry
@@ -277,11 +296,11 @@ class VehicleAgent:
 
             # 6. Publish telemetry to Redis (include status so orchestrator shows ON_SCENE)
             telemetry.operational_status = self.operational_status.value
-            await self.redis_client.publish_telemetry(telemetry)
+            await self._publish_telemetry(telemetry)
 
             # 7. Publish alerts if any were generated
             for alert in alerts:
-                await self.redis_client.publish_alert(alert)
+                await self._publish_alert(alert)
                 logger.warning(
                     "alert_generated",
                     vehicle_id=self.config.vehicle_id,
@@ -317,7 +336,7 @@ class VehicleAgent:
         # Jitter ±25 % so not every vehicle finishes at the same time
         jitter = random.uniform(0.75, 1.25)
         self._repair_duration_seconds = REPAIR_DURATION_SECONDS * jitter
-        self._repair_started_at = datetime.now(UTC)
+        self._repair_started_at = self.clock.now()
 
         logger.warning(
             "vehicle_entered_maintenance",
@@ -331,7 +350,7 @@ class VehicleAgent:
         if self._repair_started_at is None:
             return
 
-        elapsed = (datetime.now(UTC) - self._repair_started_at).total_seconds()
+        elapsed = (self.clock.now() - self._repair_started_at).total_seconds()
         if elapsed < self._repair_duration_seconds:
             return  # still being repaired
 
@@ -353,15 +372,12 @@ class VehicleAgent:
 
     async def _publish_alert_cleared(self) -> None:
         """Publish a cleared-alert notification to the orchestrator via Redis."""
-        redis_conn = self.redis_client.redis
-        if redis_conn is None:
-            return
         channel = f"aegis:{self.config.fleet_id}:alerts_cleared:{self.config.vehicle_id}"
         payload = json.dumps(
-            {"vehicle_id": self.config.vehicle_id, "cleared_at": datetime.now(UTC).isoformat()}
+            {"vehicle_id": self.config.vehicle_id, "cleared_at": self.clock.now().isoformat()}
         )
         try:
-            await redis_conn.publish(channel, payload)
+            await self._bus.publish(channel, payload)
             logger.info("alert_cleared_published", vehicle_id=self.config.vehicle_id)
         except Exception as e:
             logger.error(
@@ -380,7 +396,7 @@ class VehicleAgent:
             "vehicle_type": self.config.vehicle_type.value,
             "running": self.running,
             "uptime_seconds": self.uptime_seconds,
-            "redis_connected": self.redis_client.is_connected,
+            "redis_connected": self._bus_connected,
             "operational_status": self.operational_status.value,
             "current_emergency_id": self.current_emergency_id,
         }
@@ -396,34 +412,19 @@ class VehicleAgent:
 
         The method exits cleanly when the task is cancelled or the agent stops.
         """
-        redis_conn = self.redis_client.redis
-        if redis_conn is None:
-            logger.warning("command_listener_no_redis", vehicle_id=self.config.vehicle_id)
-            return
-
         commands_channel = self.config.get_channel_name("commands")
         resolved_pattern = "aegis:dispatch:*:resolved"
-
-        pubsub = redis_conn.pubsub()
         try:
-            await pubsub.subscribe(commands_channel)
-            await pubsub.psubscribe(resolved_pattern)
-
             logger.info(
                 "command_listener_started",
                 vehicle_id=self.config.vehicle_id,
                 commands_channel=commands_channel,
             )
 
-            async for raw in pubsub.listen():
+            async for message in self._bus.subscribe_patterns(commands_channel, resolved_pattern):
                 if not self.running:
                     break
-                if raw["type"] not in ("message", "pmessage"):
-                    continue
-                data = raw.get("data", "")
-                if not data or not isinstance(data, str):
-                    continue
-                await self._handle_command(data)
+                await self._handle_command(message.data)
 
         except asyncio.CancelledError:
             pass
@@ -434,12 +435,32 @@ class VehicleAgent:
                 error=str(e),
             )
         finally:
-            try:
-                await pubsub.unsubscribe()
-                await pubsub.punsubscribe()
-                await pubsub.close()
-            except Exception:
-                pass
+            pass
+
+    async def _publish_telemetry(self, telemetry: VehicleTelemetry) -> None:
+        """Publish telemetry to the fleet telemetry channel."""
+        channel = self.config.get_channel_name("telemetry")
+        try:
+            await self._bus.publish(channel, telemetry.model_dump_json())
+        except Exception as exc:
+            logger.error(
+                "telemetry_publish_failed",
+                vehicle_id=self.config.vehicle_id,
+                error=str(exc),
+            )
+
+    async def _publish_alert(self, alert: PredictiveAlert) -> None:
+        """Publish predictive alert to the fleet alerts channel."""
+        channel = self.config.get_channel_name("alerts")
+        try:
+            await self._bus.publish(channel, alert.model_dump_json())
+        except Exception as exc:
+            logger.error(
+                "alert_publish_failed",
+                vehicle_id=self.config.vehicle_id,
+                alert_id=alert.alert_id,
+                error=str(exc),
+            )
 
     async def _handle_command(self, raw_data: str) -> None:
         """Parse and react to a single command payload.

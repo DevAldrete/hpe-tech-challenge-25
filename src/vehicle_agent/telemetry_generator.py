@@ -7,10 +7,10 @@ Phase 1: Constant baseline values with Gaussian noise, differentiated per vehicl
 
 import math
 import random
-from datetime import UTC, datetime
 
 import structlog
 
+from src.core.time import Clock, RealClock
 from src.models.enums import OperationalStatus
 from src.models.telemetry import VehicleTelemetry
 from src.vehicle_agent.config import (
@@ -35,7 +35,7 @@ class SimpleTelemetryGenerator:
     failure patterns.
     """
 
-    def __init__(self, config: AgentConfig) -> None:
+    def __init__(self, config: AgentConfig, clock: Clock | None = None) -> None:
         """
         Initialize telemetry generator.
 
@@ -43,6 +43,7 @@ class SimpleTelemetryGenerator:
             config: Agent configuration containing vehicle identity and initial state
         """
         self.config = config
+        self.clock = clock or RealClock()
 
         # State variables for movement
         self.current_latitude = config.initial_latitude
@@ -86,7 +87,8 @@ class SimpleTelemetryGenerator:
         # Generate telemetry with noise
         telemetry = VehicleTelemetry(
             vehicle_id=self.config.vehicle_id,
-            timestamp=datetime.now(UTC),
+            vehicle_type=self.config.vehicle_type,
+            timestamp=self.clock.now(),
             latitude=self.current_latitude,
             longitude=self.current_longitude,
             speed_kmh=self.current_speed_kmh,

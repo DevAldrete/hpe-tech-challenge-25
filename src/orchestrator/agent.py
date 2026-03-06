@@ -9,20 +9,24 @@ emergency dispatch.
 import asyncio
 import json
 from collections.abc import Callable, Coroutine
-from datetime import datetime
 from typing import Any
 
-import redis.asyncio as redis
 import structlog
 
+from src.core.messaging import BusMessage, MessageBus
+from src.core.persistence import AlertSink, TelemetrySink
+from src.core.time import Clock, RealClock
+from src.infrastructure.redis_bus import RedisMessageBus
 from src.models.alerts import PredictiveAlert
-from src.models.dispatch import Dispatch, VehicleStatusSnapshot
+from src.models.dispatch import Dispatch
 from src.models.emergency import Emergency, EmergencyStatus
-from src.models.enums import OperationalStatus, VehicleType
+from src.models.enums import OperationalStatus
 from src.models.telemetry import VehicleTelemetry
-from src.orchestrator.dispatch_engine import DispatchEngine
+from src.orchestrator.emergency_service import EmergencyService
+from src.orchestrator.fleet_service import FleetService
+from src.orchestrator.persistence import DatabaseAlertPersister, DatabaseTelemetryPersister
 from src.storage.database import db
-from src.storage.repositories import AlertRepository, TelemetryRepository
+from src.storage.repositories import TelemetryRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -33,30 +37,27 @@ ALERTS_CLEARED_PATTERN = "aegis:*:alerts_cleared:*"
 EMERGENCY_CHANNEL = "aegis:emergencies:new"
 DISPATCH_CHANNEL_PREFIX = "aegis:dispatch"
 
-# Emergencies that stay in DISPATCHING longer than this are cancelled (no units found).
-EMERGENCY_DISPATCH_TIMEOUT_MINUTES = 10
-# Emergencies that stay DISPATCHED/IN_PROGRESS longer than this are auto-resolved.
-EMERGENCY_MAX_DURATION_MINUTES = 30
 # How often the background sweeper runs (seconds).
 SWEEPER_INTERVAL_SECONDS = 30.0
-# Accumulate this many telemetry records before writing them in a single DB transaction.
-TELEMETRY_BATCH_SIZE = 10
 
 
 class OrchestratorAgent:
     """Central brain of the AEGIS system.
 
-    Subscribes to all vehicle channels via Redis pub/sub and maintains
-    an in-memory fleet state. Processes incoming emergencies and triggers
-    dispatch via the DispatchEngine.
+    Subscribes to all vehicle channels via Redis pub/sub, handles background
+    database persistence, and broadcasts real-time WebSocket updates.
 
-    The fleet state is a shared mutable dict updated by telemetry messages
-    and read by the DispatchEngine for unit selection.
+    Delegates all core domain logic to dedicated services:
+    - FleetService: Manages vehicle telemetry, status updates, and alerts.
+    - EmergencyService: Manages incoming emergencies, unit selection (via
+      DispatchEngine), and timeout rules.
 
     Attributes:
-        fleet: Dict of vehicle_id -> VehicleStatusSnapshot (in-memory state).
-        emergencies: Dict of emergency_id -> Emergency (in-memory).
-        dispatches: Dict of emergency_id -> Dispatch (in-memory).
+        fleet_service: Domain service managing the fleet state.
+        emergency_service: Domain service managing emergency routing and dispatch.
+        fleet: Aliased dict of vehicle_id -> VehicleStatusSnapshot (managed by FleetService).
+        emergencies: Aliased dict of emergency_id -> Emergency (managed by EmergencyService).
+        dispatches: Aliased dict of emergency_id -> Dispatch (managed by EmergencyService).
     """
 
     def __init__(
@@ -68,6 +69,10 @@ class OrchestratorAgent:
         fleet_id: str = "fleet01",
         ws_broadcast_callback: Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
         | None = None,
+        message_bus: MessageBus | None = None,
+        clock: Clock | None = None,
+        telemetry_sink: TelemetrySink | None = None,
+        alert_sink: AlertSink | None = None,
     ) -> None:
         """Initialize the orchestrator.
 
@@ -87,52 +92,42 @@ class OrchestratorAgent:
         self._redis_password = redis_password
         self._redis_db = redis_db
         self._fleet_id = fleet_id
+        self._clock = clock or RealClock()
 
         # Optional callback for WebSocket broadcasting (injected by api.py)
         self._ws_broadcast = ws_broadcast_callback
 
-        self.fleet: dict[str, VehicleStatusSnapshot] = {}
-        self.emergencies: dict[str, Emergency] = {}
-        self.dispatches: dict[str, Dispatch] = {}
-        # Latest active PredictiveAlert per vehicle (cleared when alert_cleared received)
-        self.active_alerts: dict[str, PredictiveAlert] = {}
+        self.fleet_service = FleetService()
+        self.fleet = self.fleet_service.fleet
 
-        self.dispatch_engine = DispatchEngine(self.fleet)
+        self.emergency_service = EmergencyService(self.fleet)
 
-        self._redis: redis.Redis | None = None
-        self._pubsub: redis.client.PubSub | None = None
+        self.emergencies = self.emergency_service.emergencies
+        self.dispatches = self.emergency_service.dispatches
+        self.active_alerts = self.fleet_service.active_alerts
+
+        self._bus = message_bus or RedisMessageBus(
+            host=self._redis_host,
+            port=self._redis_port,
+            password=self._redis_password,
+            db=self._redis_db,
+        )
+
+        self._telemetry_sink = telemetry_sink or DatabaseTelemetryPersister(batch_size=10)
+        self._alert_sink = alert_sink or DatabaseAlertPersister()
         self.running = False
-
-        # Telemetry write buffer — records accumulate here until TELEMETRY_BATCH_SIZE
-        # is reached, then they are flushed in a single DB transaction.
-        self._telemetry_buffer: list[tuple[VehicleTelemetry, str]] = []
 
     async def start(self) -> None:
         """Connect to Redis and start background listener task.
 
         Raises:
-            redis.ConnectionError: If Redis is unreachable.
+            RuntimeError: If messaging backend is unreachable.
         """
-        self._redis = redis.Redis(
-            host=self._redis_host,
-            port=self._redis_port,
-            password=self._redis_password,
-            db=self._redis_db,
-            decode_responses=True,
-        )
-        await self._redis.ping()
-
-        self._pubsub = self._redis.pubsub()
-        await self._pubsub.psubscribe(
-            TELEMETRY_PATTERN,
-            ALERTS_PATTERN,
-            ALERTS_CLEARED_PATTERN,
-            EMERGENCY_CHANNEL,
-        )
+        await self._bus.connect()
 
         self.running = True
         # Background sweeper for timed-out emergencies
-        self._sweeper_task: asyncio.Task | None = asyncio.create_task(  # type: ignore[type-arg]
+        self._sweeper_task: asyncio.Task[Any] | None = asyncio.create_task(
             self._emergency_sweeper(), name="emergency-sweeper"
         )
         logger.info(
@@ -150,14 +145,8 @@ class OrchestratorAgent:
                 await self._sweeper_task
             except asyncio.CancelledError:
                 pass
-        # Flush any remaining buffered telemetry before closing
-        if self._telemetry_buffer:
-            await self._flush_telemetry_buffer()
-        if self._pubsub:
-            await self._pubsub.punsubscribe()
-            await self._pubsub.close()
-        if self._redis:
-            await self._redis.aclose()
+        await self._telemetry_sink.close()
+        await self._bus.close()
         logger.info("orchestrator_stopped")
 
     async def run(self) -> None:
@@ -167,26 +156,33 @@ class OrchestratorAgent:
         """
         await self.start()
         try:
-            async for raw in self._pubsub.listen():  # type: ignore[union-attr]
+            async for message in self._bus.subscribe_patterns(
+                TELEMETRY_PATTERN,
+                ALERTS_PATTERN,
+                ALERTS_CLEARED_PATTERN,
+                EMERGENCY_CHANNEL,
+            ):
                 if not self.running:
                     break
-                if raw["type"] not in ("message", "pmessage"):
-                    continue
-                await self._handle_raw_message(raw)
+                await self._handle_raw_message(message)
         except Exception as e:
             logger.error("orchestrator_error", error=str(e), exc_info=True)
             raise
         finally:
             await self.stop()
 
-    async def _handle_raw_message(self, raw: dict) -> None:
+    async def _handle_raw_message(self, raw: BusMessage | dict[str, Any]) -> None:
         """Parse and dispatch an incoming Redis pub/sub message.
 
         Args:
             raw: Raw message dict from redis-py pubsub listener.
         """
-        channel: str = raw.get("channel", "") or raw.get("pattern", "") or ""
-        data: str = raw.get("data", "")
+        if isinstance(raw, BusMessage):
+            channel = raw.channel
+            data = raw.data
+        else:
+            channel = raw.get("channel", "") or raw.get("pattern", "") or ""
+            data = raw.get("data", "")
 
         if not data or not isinstance(data, str):
             return
@@ -214,35 +210,12 @@ class OrchestratorAgent:
         """
         vehicle_id = telemetry.vehicle_id
 
-        snap = self.fleet.get(vehicle_id)
-        if snap is None:
-            # First time seeing this vehicle - infer type from ID prefix
-            vehicle_type = _infer_vehicle_type(vehicle_id)
-            snap = VehicleStatusSnapshot(
-                vehicle_id=vehicle_id,
-                vehicle_type=vehicle_type,
-                operational_status=OperationalStatus.IDLE,
-            )
-            self.fleet[vehicle_id] = snap
-            logger.info("new_vehicle_registered", vehicle_id=vehicle_id, type=vehicle_type.value)
+        is_new, vehicle_type, snap = self.fleet_service.process_telemetry(telemetry)
 
+        if is_new and vehicle_type:
+            logger.info("new_vehicle_registered", vehicle_id=vehicle_id, type=vehicle_type.value)
             # Persist vehicle metadata
             asyncio.create_task(self._persist_vehicle(vehicle_id, vehicle_type.value, "active"))
-
-        # Update last seen timestamp
-        snap.last_seen_at = datetime.utcnow()
-
-        # Update location
-        from src.models.vehicle import Location
-
-        try:
-            snap.location = Location(
-                latitude=telemetry.latitude,
-                longitude=telemetry.longitude,
-                timestamp=telemetry.timestamp,
-            )
-        except Exception:
-            pass  # Location parse failure is non-fatal
 
         # Update key health metrics
         snap.battery_voltage = float(telemetry.battery_voltage)
@@ -267,10 +240,8 @@ class OrchestratorAgent:
 
         logger.debug("telemetry_processed", vehicle_id=vehicle_id)
 
-        # Buffer telemetry for batched DB writes
-        self._telemetry_buffer.append((telemetry, vehicle_id))
-        if len(self._telemetry_buffer) >= TELEMETRY_BATCH_SIZE:
-            asyncio.create_task(self._flush_telemetry_buffer())
+        # Enqueue telemetry for asynchronous persistence
+        asyncio.create_task(self._telemetry_sink.enqueue(telemetry, vehicle_id))
 
         # Broadcast live snapshot to WebSocket clients if a callback is registered
         if self._ws_broadcast is not None:
@@ -310,31 +281,6 @@ class OrchestratorAgent:
         except Exception as e:
             logger.error("db_persist_vehicle_error", vehicle_id=vehicle_id, error=str(e))
 
-    async def _flush_telemetry_buffer(self) -> None:
-        """Flush the in-memory telemetry buffer to the database in one transaction.
-
-        Drains ``self._telemetry_buffer`` atomically (swaps it for an empty list
-        before the DB round-trip so concurrent callers do not double-write) and
-        persists all buffered records inside a single session.
-        """
-        if db.engine is None:
-            self._telemetry_buffer.clear()
-            return
-
-        # Swap the buffer atomically so new records keep accumulating while we write
-        batch, self._telemetry_buffer = self._telemetry_buffer, []
-        if not batch:
-            return
-
-        try:
-            async with db.session() as session:
-                repo = TelemetryRepository(session)
-                for telemetry, vehicle_id in batch:
-                    await repo.save_telemetry(telemetry, vehicle_id)
-            logger.debug("telemetry_batch_flushed", count=len(batch))
-        except Exception as e:
-            logger.error("db_flush_telemetry_error", count=len(batch), error=str(e))
-
     async def _handle_alert(self, alert: PredictiveAlert) -> None:
         """Mark a vehicle as having an active alert and store the full alert details.
 
@@ -342,14 +288,12 @@ class OrchestratorAgent:
             alert: PredictiveAlert payload from a vehicle.
         """
         vehicle_id = alert.vehicle_id
-        if vehicle_id in self.fleet:
-            self.fleet[vehicle_id].has_active_alert = True
-        # Keep the most recent alert for API/dashboard consumption
-        self.active_alerts[vehicle_id] = alert
+
+        self.fleet_service.handle_alert(alert)
         logger.info("alert_received", vehicle_id=vehicle_id, alert_id=alert.alert_id)
 
         # Persist alert in the background
-        asyncio.create_task(self._persist_alert(alert, vehicle_id))
+        asyncio.create_task(self._alert_sink.persist_alert(alert, vehicle_id))
 
     async def _handle_alert_cleared(self, raw_data: str) -> None:
         """Clear the active-alert flag for a vehicle that completed repairs.
@@ -369,14 +313,10 @@ class OrchestratorAgent:
             logger.warning("alert_cleared_parse_error", raw=raw_data)
             return
 
-        if vehicle_id in self.fleet:
-            self.fleet[vehicle_id].has_active_alert = False
-            self.fleet[vehicle_id].operational_status = OperationalStatus.IDLE
-            logger.info("alert_cleared", vehicle_id=vehicle_id)
-            # Retry any emergencies waiting for units
-            await self._retry_dispatching_emergencies()
-        # Remove the stored alert
-        self.active_alerts.pop(vehicle_id, None)
+        self.fleet_service.clear_alert(vehicle_id)
+        logger.info("alert_cleared", vehicle_id=vehicle_id)
+
+        await self._retry_dispatching_emergencies()
 
     async def _retry_dispatching_emergencies(self) -> None:
         """Attempt to dispatch emergencies that previously had no available units.
@@ -384,7 +324,7 @@ class OrchestratorAgent:
         Iterates all emergencies in DISPATCHING status and re-runs the dispatch
         engine now that a vehicle has become available.
         """
-        waiting = [e for e in self.emergencies.values() if e.status == EmergencyStatus.DISPATCHING]
+        waiting = self.emergency_service.get_dispatching_emergencies()
         for emergency in waiting:
             logger.info(
                 "retrying_dispatch",
@@ -403,54 +343,34 @@ class OrchestratorAgent:
         """
         while self.running:
             try:
-                await asyncio.sleep(SWEEPER_INTERVAL_SECONDS)
-                now = datetime.utcnow()
+                await self._clock.sleep(SWEEPER_INTERVAL_SECONDS)
 
-                for emergency in list(self.emergencies.values()):
-                    age_minutes = (now - emergency.created_at).total_seconds() / 60.0
+                to_cancel, to_resolve = self.emergency_service.evaluate_stale_emergencies()
 
-                    if emergency.status == EmergencyStatus.DISPATCHING:
-                        if age_minutes >= EMERGENCY_DISPATCH_TIMEOUT_MINUTES:
-                            emergency.status = EmergencyStatus.CANCELLED
-                            logger.warning(
-                                "emergency_cancelled_no_units",
-                                emergency_id=emergency.emergency_id,
-                                age_minutes=round(age_minutes, 1),
-                            )
+                for emergency in to_cancel:
+                    logger.warning(
+                        "emergency_cancelled_no_units",
+                        emergency_id=emergency.emergency_id,
+                    )
 
-                    elif emergency.status in (
-                        EmergencyStatus.DISPATCHED,
-                        EmergencyStatus.IN_PROGRESS,
-                    ):
-                        if age_minutes >= EMERGENCY_MAX_DURATION_MINUTES:
-                            try:
-                                await self.resolve_emergency(emergency.emergency_id)
-                                logger.info(
-                                    "emergency_auto_resolved",
-                                    emergency_id=emergency.emergency_id,
-                                    age_minutes=round(age_minutes, 1),
-                                )
-                            except Exception as exc:
-                                logger.error(
-                                    "auto_resolve_failed",
-                                    emergency_id=emergency.emergency_id,
-                                    error=str(exc),
-                                )
+                for emergency in to_resolve:
+                    try:
+                        await self.resolve_emergency(emergency.emergency_id)
+                        logger.info(
+                            "emergency_auto_resolved",
+                            emergency_id=emergency.emergency_id,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "auto_resolve_failed",
+                            emergency_id=emergency.emergency_id,
+                            error=str(exc),
+                        )
+
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.error("sweeper_error", error=str(exc))
-
-    async def _persist_alert(self, alert: PredictiveAlert, vehicle_id: str) -> None:
-        """Background task to persist alert."""
-        if db.engine is None:
-            return
-        try:
-            async with db.session() as session:
-                repo = AlertRepository(session)
-                await repo.save_alert(alert, vehicle_id)
-        except Exception as e:
-            logger.error("db_persist_alert_error", vehicle_id=vehicle_id, error=str(e))
 
     async def process_emergency(self, emergency: Emergency) -> Dispatch:
         """Process a new emergency: run dispatch and publish assignments to Redis.
@@ -468,16 +388,10 @@ class OrchestratorAgent:
         Returns:
             The resulting Dispatch record.
         """
-        self.emergencies[emergency.emergency_id] = emergency
+        # Delegate to domain service
+        dispatch = self.emergency_service.process_emergency(emergency)
 
-        dispatch = self.dispatch_engine.select_units(emergency)
-        self.dispatches[emergency.emergency_id] = dispatch
-
-        if dispatch.units:
-            emergency.status = EmergencyStatus.DISPATCHED
-            emergency.dispatched_at = datetime.utcnow()
-        else:
-            emergency.status = EmergencyStatus.DISPATCHING
+        if not dispatch.units:
             logger.warning(
                 "no_units_available",
                 emergency_id=emergency.emergency_id,
@@ -485,7 +399,7 @@ class OrchestratorAgent:
             )
 
         # Publish assignment to each vehicle
-        if self._redis:
+        if self.running:
             for unit in dispatch.units:
                 channel = f"aegis:{self._fleet_id}:commands:{unit.vehicle_id}"
                 payload = {
@@ -496,7 +410,7 @@ class OrchestratorAgent:
                     "dispatch_id": dispatch.dispatch_id,
                 }
                 try:
-                    await self._redis.publish(channel, json.dumps(payload))
+                    await self._bus.publish(channel, json.dumps(payload))
                 except Exception as e:
                     logger.error(
                         "dispatch_publish_failed",
@@ -512,7 +426,7 @@ class OrchestratorAgent:
                 "assigned_vehicles": dispatch.vehicle_ids,
             }
             try:
-                await self._redis.publish(broadcast_channel, json.dumps(broadcast_payload))
+                await self._bus.publish(broadcast_channel, json.dumps(broadcast_payload))
             except Exception as e:
                 logger.error("broadcast_failed", emergency_id=emergency.emergency_id, error=str(e))
 
@@ -538,18 +452,18 @@ class OrchestratorAgent:
         Raises:
             KeyError: If the emergency_id is not found.
         """
-        emergency = self.emergencies[emergency_id]
-        emergency.status = EmergencyStatus.RESOLVED
-        emergency.resolved_at = datetime.utcnow()
-
-        released = self.dispatch_engine.release_units(emergency_id)
+        released = self.emergency_service.resolve_emergency(emergency_id)
 
         # Publish resolution broadcast
-        if self._redis:
+        if self.running:
             channel = f"{DISPATCH_CHANNEL_PREFIX}:{emergency_id}:resolved"
-            payload = {"emergency_id": emergency_id, "released_vehicles": released}
+            payload = {
+                "command": "resolve",
+                "emergency_id": emergency_id,
+                "released_vehicles": released,
+            }
             try:
-                await self._redis.publish(channel, json.dumps(payload))
+                await self._bus.publish(channel, json.dumps(payload))
             except Exception as e:
                 logger.error("resolve_broadcast_failed", emergency_id=emergency_id, error=str(e))
 
@@ -567,53 +481,9 @@ class OrchestratorAgent:
             Dict with total count, available count, on-mission count,
             vehicles with alerts, active emergencies, and per-type breakdown.
         """
-        total = len(self.fleet)
-        available = sum(1 for s in self.fleet.values() if s.is_available)
-        on_mission = sum(
+        active_emergencies_count = sum(
             1
-            for s in self.fleet.values()
-            if s.operational_status.value in ("en_route", "on_scene", "returning")
+            for e in self.emergencies.values()
+            if e.status not in (EmergencyStatus.RESOLVED, EmergencyStatus.CANCELLED)
         )
-        vehicles_with_alerts = sum(1 for s in self.fleet.values() if s.has_active_alert)
-        by_type: dict[str, dict[str, int]] = {}
-
-        for snap in self.fleet.values():
-            key = snap.vehicle_type.value
-            if key not in by_type:
-                by_type[key] = {"total": 0, "available": 0}
-            by_type[key]["total"] += 1
-            if snap.is_available:
-                by_type[key]["available"] += 1
-
-        return {
-            "total_vehicles": total,
-            "available_vehicles": available,
-            "on_mission": on_mission,
-            "vehicles_with_alerts": vehicles_with_alerts,
-            "active_emergencies": sum(
-                1
-                for e in self.emergencies.values()
-                if e.status not in (EmergencyStatus.RESOLVED, EmergencyStatus.CANCELLED)
-            ),
-            "by_type": by_type,
-        }
-
-
-def _infer_vehicle_type(vehicle_id: str) -> VehicleType:
-    """Infer vehicle type from vehicle_id prefix convention.
-
-    Args:
-        vehicle_id: Vehicle identifier (e.g. AMB-001, FIRE-002, POL-003).
-
-    Returns:
-        Best-guess VehicleType, defaults to AMBULANCE if unknown.
-    """
-    vid = vehicle_id.upper()
-    if vid.startswith("AMB"):
-        return VehicleType.AMBULANCE
-    if vid.startswith("FIR") or vid.startswith("FIRE"):
-        return VehicleType.FIRE_TRUCK
-    if vid.startswith("POL"):
-        return VehicleType.POLICE
-    logger.warning("unknown_vehicle_id_prefix", vehicle_id=vehicle_id)
-    return VehicleType.AMBULANCE
+        return self.fleet_service.get_summary(active_emergencies_count)
