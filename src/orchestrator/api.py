@@ -32,11 +32,14 @@ from src.models.emergency import (
 )
 from src.models.vehicle import Location
 from src.orchestrator.agent import OrchestratorAgent
-from src.orchestrator.emergency_generator import EmergencyGenerator
+from src.orchestrator.emergency_prediction_generator import EmergencyGenerator
+from src.orchestrator.historical_injector import HistoricalCrimeInjector
 from src.storage.database import db
 
 logger = structlog.get_logger(__name__)
 
+MINUTES_PER_TICK = 60
+SECOND_BEFORE_UPDATE = 3.0
 
 # ---------------------------------------------------------------------------
 # Request / Response schemas
@@ -166,21 +169,40 @@ def create_app(orchestrator: OrchestratorAgent) -> FastAPI:
         """Start orchestrator listener on app startup, stop on shutdown."""
         db.connect()
         task = asyncio.create_task(_run_orchestrator(orchestrator))
-        generator = EmergencyGenerator(orchestrator, rate_per_hour=12.0)
-        gen_task = asyncio.create_task(generator.start())
+
+        sim_start_time = datetime(2026, 3, 6, 18, 0)
+        ai_generator = EmergencyGenerator(
+            orchestrator, 
+            start_time=sim_start_time,
+            simulated_minutes_per_tick=MINUTES_PER_TICK,  # Jump 10 minutes forward...
+            tick_interval_seconds=SECOND_BEFORE_UPDATE    # ...every 3 real-world seconds
+        )
+        ai_gen_task = asyncio.create_task(ai_generator.start())
+
+        historical_injector = HistoricalCrimeInjector(
+            orchestrator, 
+            start_time=sim_start_time,
+            simulated_minutes_per_tick=MINUTES_PER_TICK,
+            tick_interval_seconds=SECOND_BEFORE_UPDATE
+        )
+        hist_task = asyncio.create_task(historical_injector.start())
 
         yield
 
         orchestrator.running = False
-        generator.stop()
+        ai_generator.stop()
+        historical_injector.stop()
+        
         task.cancel()
-        gen_task.cancel()
+        ai_gen_task.cancel()
+        hist_task.cancel()
+
         try:
             await task
         except asyncio.CancelledError:
             pass
         try:
-            await gen_task
+            await ai_gen_task
         except asyncio.CancelledError:
             pass
         await orchestrator.stop()
