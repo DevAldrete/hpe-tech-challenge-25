@@ -1,116 +1,113 @@
 # Data Architecture - Project AEGIS
 
-**Version:** 2.0.0
-**Status:** Implemented (POC with refactored boundaries)
+**Version:** 2.1.0  
+**Status:** Implemented and active in runtime  
 **Last Updated:** 2026-03-08
 
 ## Overview
 
-AEGIS models emergency fleets as autonomous vehicle agents coordinated by a central orchestrator.
-The architecture now separates:
+AEGIS data architecture is optimized for real-time dispatch decisions:
 
-- runtime control (agents + orchestrator),
-- transport (message bus),
-- time source (clock abstraction),
-- persistence side effects (sinks/persisters).
+- in-memory state is the operational source of truth,
+- pub/sub messages carry canonical domain payloads,
+- database persistence is asynchronous and analytics-focused.
 
-## Code-Level Architecture
+This split keeps emergency coordination responsive while still preserving history.
 
-### Core Contracts (`src/core/`)
+## Data Ownership by Layer
 
-- `time.py`
-  - `Clock`
-  - `RealClock`
-  - `FastForwardClock` (test acceleration)
-- `messaging.py`
-  - `MessageBus`
-  - `BusMessage`
-- `persistence.py`
-  - `TelemetrySink`
-  - `AlertSink`
+### Runtime state (authoritative for control decisions)
 
-### Infrastructure (`src/infrastructure/`)
+- Fleet state: `FleetService.fleet` (`dict[str, VehicleStatusSnapshot]`).
+- Active alerts: `FleetService.active_alerts` (`dict[str, PredictiveAlert]`).
+- Emergency state: `EmergencyService.emergencies` (`dict[str, Emergency]`).
+- Dispatch state: `EmergencyService.dispatches` (`dict[str, Dispatch]`).
 
-- `redis_bus.py` -> production transport
-- `in_memory_bus.py` -> deterministic E2E transport
+These structures are updated directly from message events and API commands.
 
-### Domain + Runtime
+### Persistence state (durable history / analytics)
 
-- `src/vehicle_agent/agent.py`
-  - emits registration, telemetry, alerts
-  - consumes dispatch/resolve commands
-- `src/orchestrator/agent.py`
-  - consumes registration, telemetry, alerts, clear events
-  - dispatch and retry orchestration
-- `src/orchestrator/fleet_service.py`
-  - fleet snapshot management and registration handling
-- `src/orchestrator/emergency_service.py`
-  - emergency lifecycle and dispatch coordination
-- `src/orchestrator/persistence.py`
-  - DB telemetry batching + alert persistence
+- Telemetry time-series persisted by `DatabaseTelemetryPersister`.
+- Predictive alerts persisted by `DatabaseAlertPersister`.
+- Dispatch snapshots + timeline events persisted by `DatabaseEmergencyAnalyticsPersister`.
 
-## Canonical Data Models
+Persistence failures are logged and do not block control-loop progression.
 
-### Vehicle and Location
+## Core Domain Models and Why They Matter
 
-- `src/models/vehicle.py`
-  - `Vehicle`
-  - `Location`
-  - `VehicleRegistration`
+### Vehicle and telemetry domain
 
-### Telemetry
+- `VehicleTelemetry` (`src/models/telemetry.py`)
+  - Per-tick sensor payload.
+  - Includes `vehicle_type` to avoid string-prefix inference.
+  - Optionally carries `operational_status` so orchestrator can reflect true runtime transitions.
+- `VehicleStatusSnapshot` (`src/models/dispatch.py`)
+  - Orchestrator-maintained projection of each vehicle.
+  - `is_available` is derived (`IDLE` and no active alert).
 
-- `src/models/telemetry.py`
-  - `VehicleTelemetry`
-  - includes `vehicle_type` for explicit metadata propagation
+### Alert domain
 
-### Alerts
+- `PredictiveAlert` (`src/models/alerts.py`)
+  - Actionable alert envelope with severity/category/probability/confidence.
+  - Used for dispatch eligibility (`has_active_alert`) and ops visibility.
 
-- `src/models/alerts.py`
-  - `PredictiveAlert`
+### Emergency/dispatch domain
 
-### Emergency and Dispatch
+- `Emergency` (`src/models/emergency.py`)
+  - Incident lifecycle state machine (`PENDING -> DISPATCHING -> DISPATCHED -> IN_PROGRESS -> CLOSED`).
+  - Captures severity, unit requirements, and coordination checkpoints.
+- `Dispatch` + `DispatchedUnit` (`src/models/dispatch.py`)
+  - Assignment record per emergency.
+  - Tracks ack status, ETA estimates, and actual arrival timestamps.
 
-- `src/models/emergency.py`
-  - `Emergency`, `UnitsRequired`, enums
-- `src/models/dispatch.py`
-  - `Dispatch`, `DispatchedUnit`, `VehicleStatusSnapshot`
+### Event envelope domain
 
-### Events
+- `VehicleRegistrationEvent` (`src/models/events.py`)
+  - Explicit startup metadata event (`event + payload`) for clean registration semantics.
 
-- `src/models/events.py`
-  - `VehicleRegistrationEvent`
+## Data Flow: From Telemetry to Decision
 
-## State and Data Flow
+1. Vehicle publishes `VehicleTelemetry`.
+2. Orchestrator validates payload with Pydantic model parsing.
+3. `FleetService.process_telemetry` updates `VehicleStatusSnapshot` fields.
+4. Updated snapshot becomes immediately usable by `DispatchEngine`.
+5. Same telemetry is enqueued for DB persistence asynchronously.
 
-1. Vehicle starts and publishes `VehicleRegistrationEvent`.
-2. Orchestrator registers/updates snapshot via `FleetService.register_vehicle(...)`.
-3. Vehicle streams `VehicleTelemetry`.
-4. Orchestrator updates fleet state and enqueues persistence via `TelemetrySink`.
-5. Vehicle emits `PredictiveAlert` when anomaly logic triggers.
-6. Orchestrator updates active alert state and persists via `AlertSink`.
-7. Dispatch commands and resolve broadcasts update vehicle operational status.
+This is a projection pattern: write once to in-memory operational state, persist side effects out-of-band.
 
-## Persistence Strategy
+## Emergency Lifecycle Data Transitions
 
-- Online source of truth for runtime decisions: in-memory fleet/emergency state.
-- Persistence side effects:
-  - telemetry batched by `DatabaseTelemetryPersister`
-  - alerts persisted by `DatabaseAlertPersister`
-- DB writes are asynchronous relative to control-loop behavior.
+1. Emergency creation stores `Emergency` in `emergencies` map.
+2. `DispatchEngine.select_units` creates `Dispatch` and mutates selected snapshots to `EN_ROUTE`.
+3. Vehicle dispatch acknowledgments update `DispatchedUnit.acknowledged*` fields.
+4. Vehicle arrival updates `actual_arrival_at` and computed `eta_error_minutes`.
+5. Coordination tasks update `Emergency.coordination_status`.
+6. Resolve/dismiss transitions set terminal timestamps and release units to `IDLE`.
 
 ## Machine Learning Artifacts
-- Training Data: The file acts as the read-only foundational dataset. The ML pipeline uses 80% for training, while the `HistoricalCrimeInjector` uses the chronologically newest 20% for real-time holdout validation.
-- Serialized Model: Executing `src/ml/train_crime.py` processes the CSV features and persists the trained Random Forest Classifier state to `src/ml/crime_model.joblib`. This `.joblib` file acts as the runtime brain loaded into memory by the Orchestrator API.
 
-## Time and Determinism
+- Training data split: 80% is used for model training; the newest 20% is used by `HistoricalCrimeInjector` as holdout validation events.
+- Serialized model artifact: running `src/ml/train_crime.py` persists a Random Forest model to `src/ml/crime_model.joblib` for orchestrator prediction runtime.
 
-- Runtime uses `RealClock`.
-- E2E tests use `FastForwardClock` to advance simulation without wall-clock delays.
-- Timestamp defaults in core models are UTC-aware.
+## Timing and Determinism Rules
 
-## Notes on Legacy Concepts
+- All default model timestamps are UTC-aware datetimes.
+- Runtime loops and timeouts read from `Clock` abstraction, not direct `datetime.now` calls in control paths.
+- `FastForwardClock` supports deterministic testing of long-duration workflows without wall-clock waiting.
 
-- Earlier docs referenced a large envelope format and many unimplemented telemetry fields.
-- Current implementation uses direct model JSON payloads over channels.
-- The documented architecture reflects actual code in `src/` as of this version.
+## Channel Payload Contract Strategy
+
+- Messages are serialized Pydantic model JSON (no extra transport envelope).
+- Channel names encode routing context (`fleet_id`, `vehicle_id`, `emergency_id`).
+- Payload schemas stay stable while transport remains replaceable (`RedisMessageBus` vs `InMemoryMessageBus`).
+
+See `docs/COMMUNICATION_PROTOCOL.md` for exact channel/payload examples.
+
+## Practical Guidance for Contributors
+
+- When adding new telemetry metrics, update both:
+  - `VehicleTelemetry` (ingress contract),
+  - `VehicleStatusSnapshot` (dispatch/read model if metric is decision-relevant).
+- Keep dispatch decision inputs inside in-memory snapshot fields.
+- Keep DB persistence adapters side-effect only; avoid coupling dispatch outcomes to DB writes.
+- Preserve backward compatibility for channel payload fields when possible.
