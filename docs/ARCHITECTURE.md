@@ -1,121 +1,136 @@
 # Architecture Overview - Project AEGIS
 
-**Version:** 1.0.0
+**Version:** 2.1.0  
 **Last Updated:** 2026-03-08
 
-This document is the canonical high-level view of how AEGIS components interact.
+This is the code-aligned architecture for the current implementation in `src/`.
 
-## System Components
+## What the System Is
 
-- **Vehicle Agent** (`src/vehicle_agent/agent.py`)
-  - Generates telemetry
-  - Runs local anomaly/failure logic
-  - Handles dispatch/resolve commands
-- **Orchestrator Agent** (`src/orchestrator/agent.py`)
-  - Maintains fleet/emergency state
-  - Selects units via dispatch engine
-  - Publishes commands and resolves missions
-- **Message Bus** (`src/core/messaging.py`)
-  - Runtime adapter: `RedisMessageBus`
-  - Test adapter: `InMemoryMessageBus`
-- **Persistence** (`src/orchestrator/persistence.py`)
-  - Telemetry batching and DB writes
-  - Alert persistence
-- **API + Dashboard** (`src/orchestrator/api.py`, `main.py`)
-  - Fleet/emergency/alert read APIs
-  - Streamlit visualization
-- **Simulation & AI Engine** (`src/orchestrator/emergency_generator.py`, `src/orchestrator/historical_injector.py`, `src/ml/`)
-  - **AI Predictor:** Uses a trained Random Forest model to proactively predict high-risk crime zones and pre-dispatch units.
-  - **Historical Injector:** Injects real holdout crimes randomly alongside predictions to visually validate model accuracy.
-  - Both generators are synchronized strictly via the `Clock` abstraction for deterministic time travel.
+AEGIS is an event-driven emergency fleet simulator with two runtime actors:
 
-## Core Runtime Contracts
+- `VehicleAgent` (`src/vehicle_agent/agent.py`) simulates a single vehicle and publishes telemetry/alerts.
+- `OrchestratorAgent` (`src/orchestrator/agent.py`) maintains fleet and emergency state, decides dispatch, and coordinates incident lifecycle.
 
-- `Clock` (`src/core/time.py`)
-  - `RealClock` for production
-  - `FastForwardClock` for deterministic simulation tests
-- `MessageBus` (`src/core/messaging.py`)
-  - Transport-independent pub/sub contract
-- `NavigatorProvider` (`src/vehicle_agent/navigation.py`)
-  - `GeometricNavigator` (default)
-  - `OSMnxNavigator` (road-constrained)
-- `TelemetrySink` and `AlertSink` (`src/core/persistence.py`)
-  - Persistence side-effect contracts
+Both communicate through the `MessageBus` contract (`src/core/messaging.py`) so runtime and tests can swap transports.
 
-## Event Flow Map
+## Essential Building Blocks
 
-### 0) Training the Model
-Before running the Orchestrator or Docker containers, the ML model must be trained locally to generate the required artifacts. From the project root, execute:
+### 1) Vehicle runtime (`src/vehicle_agent/`)
+
+- Runs a fixed-frequency tick loop (`VehicleAgent._tick`).
+- Tick order matters:
+  1. evaluate scheduled failures,
+  2. handle maintenance timer,
+  3. generate baseline telemetry,
+  4. apply active failure scenarios,
+  5. run anomaly detection,
+  6. publish telemetry,
+  7. publish alerts.
+- Subscribes to:
+  - per-vehicle command channel for `dispatch`,
+  - global resolve pattern for `resolve`.
+
+### 2) Orchestrator runtime (`src/orchestrator/`)
+
+- Subscribes to fleet-wide telemetry, alerts, registration, and dispatch ack channels.
+- Delegates business logic to:
+  - `FleetService` (`src/orchestrator/fleet_service.py`) for vehicle snapshots and alert flags,
+  - `EmergencyService` (`src/orchestrator/emergency_service.py`) for emergency status and timeout policy,
+  - `DispatchEngine` (`src/orchestrator/dispatch_engine.py`) for nearest-available unit selection.
+- Persists side effects asynchronously via persisters in `src/orchestrator/persistence.py`.
+
+### 3) Transport abstraction (`src/core/messaging.py`)
+
+- Runtime adapter: `RedisMessageBus` (`src/infrastructure/redis_bus.py`).
+- Deterministic test adapter: `InMemoryMessageBus` (`src/infrastructure/in_memory_bus.py`).
+
+### 4) Time abstraction (`src/core/time.py`)
+
+- `RealClock` for normal execution.
+- `FastForwardClock` for deterministic tests and accelerated simulation mode.
+
+### 5) API + real-time stream (`src/orchestrator/api.py`)
+
+- FastAPI endpoints expose fleet, emergencies, alerts, timeline, and analytics.
+- WebSocket (`/ws`) broadcasts live events (`telemetry.update`, emergency events, prediction events).
+
+### 6) Simulation and AI engine (`src/orchestrator/emergency_generator.py`, `src/orchestrator/historical_injector.py`, `src/ml/`)
+
+- AI predictor uses a trained Random Forest model to forecast high-risk zones for proactive dispatch.
+- Historical injector emits holdout crimes to validate prediction quality in live simulation.
+- Both generators follow `Clock` for deterministic, time-travel-friendly simulation behavior.
+
+## Core Runtime Flows
+
+### Flow 0: Train model artifacts
+
+Before running orchestrator flows that depend on prediction, train the model artifacts:
+
 ```bash
 python src/ml/train_crime.py
 ```
 
-### 1) Vehicle startup registration
+### Flow A: Vehicle startup and registration
 
-1. Vehicle starts.
-2. Vehicle publishes `VehicleRegistrationEvent` on:
-   - `aegis:{fleet_id}:vehicles:register`
-3. Orchestrator registers snapshot in fleet service.
+1. Vehicle agent starts and connects to message bus.
+2. It immediately publishes `VehicleRegistrationEvent`.
+3. Orchestrator records/updates the vehicle snapshot before steady-state telemetry.
 
-### 2) Telemetry ingestion
+### Flow B: Telemetry update loop
 
-1. Vehicle publishes `VehicleTelemetry` on:
-   - `aegis:{fleet_id}:telemetry:{vehicle_id}`
-2. Orchestrator updates in-memory fleet snapshot.
-3. Orchestrator enqueues telemetry to persistence sink.
-4. Optional: orchestrator broadcasts live update via WebSocket callback.
+1. Vehicle publishes `VehicleTelemetry` every tick.
+2. Orchestrator updates in-memory `VehicleStatusSnapshot`.
+3. Orchestrator enqueues telemetry persistence (non-blocking).
+4. If configured, orchestrator broadcasts live telemetry over WebSocket.
 
-### 3) Predictive alert processing
+### Flow C: Alert and maintenance loop
 
-1. Vehicle detects anomaly and publishes `PredictiveAlert` on:
-   - `aegis:{fleet_id}:alerts:{vehicle_id}`
-2. Orchestrator marks vehicle with active alert.
-3. Orchestrator persists alert asynchronously.
+1. Vehicle emits `PredictiveAlert` when anomaly detector/rules trigger.
+2. Orchestrator marks `has_active_alert=True` and persists alert.
+3. Critical failures can move vehicle to `MAINTENANCE`.
+4. After repair window, vehicle publishes `alerts_cleared`.
+5. Orchestrator clears alert state and retries waiting emergencies.
 
-### 4) Dispatch lifecycle
+### Flow D: Dispatch and coordination lifecycle
 
-1. Emergency enters orchestrator (`aegis:emergencies:new` or API).
-2. Orchestrator selects nearest available units.
-3. Orchestrator sends command per unit:
-   - `aegis:{fleet_id}:commands:{vehicle_id}` (`command=dispatch`)
-4. Vehicle transitions to `EN_ROUTE`, then `ON_SCENE` on arrival.
+1. Emergency is created (API or event channel).
+2. `DispatchEngine` selects nearest available units by type.
+3. Orchestrator publishes `dispatch` command to each selected vehicle.
+4. Vehicles ack on `aegis:dispatch:{emergency_id}:ack`.
+5. Vehicles transition `EN_ROUTE -> ON_SCENE` after arrival.
+6. Orchestrator marks emergency `IN_PROGRESS`, advances coordination checkpoints.
+7. When coordination tasks are complete, orchestrator resolves emergency and broadcasts `resolve`.
 
-### 5) Resolve lifecycle
+### Flow E: Stale emergency sweeper
 
-1. Emergency is resolved by orchestrator.
-2. Orchestrator publishes:
-   - `aegis:dispatch:{emergency_id}:resolved` (`command=resolve`)
-3. Assigned vehicles transition back to `IDLE`.
+Background sweeper (`OrchestratorAgent._emergency_sweeper`) enforces lifecycle deadlines:
 
-### 6) Maintenance + retry flow
+- `DISPATCHING` too long -> `CANCELLED`
+- `DISPATCHED` stalled too long -> `DISMISSED`
+- `IN_PROGRESS` over planned duration -> auto `RESOLVED`
+- `IN_PROGRESS` over hard max duration -> `DISMISSED`
 
-1. Vehicle enters maintenance and later publishes clear event:
-   - `aegis:{fleet_id}:alerts_cleared:{vehicle_id}`
-2. Orchestrator clears active-alert state.
-3. Orchestrator retries emergencies stuck in `DISPATCHING`.
+## Design Rules That Drive This Architecture
 
-## Why this architecture
+- Keep dispatch/control loop in memory for low-latency decisions.
+- Treat database writes as asynchronous side effects, not control-loop dependencies.
+- Keep transport and time injectable for deterministic E2E tests.
+- Keep unit selection logic isolated in `DispatchEngine` for future strategy upgrades.
+- Keep channel contracts stable and explicit (see `docs/COMMUNICATION_PROTOCOL.md`).
 
-- Keeps latency-sensitive dispatch loop simple and explicit.
-- Separates transport/time/persistence concerns for readability and testability.
-- Enables deterministic end-to-end tests without Redis.
-- Preserves extension points for routing engines and background workers.
+## Where to Look First in Code
 
-## Testability model
-
-- End-to-end tests inject:
-  - `InMemoryMessageBus`
-  - `FastForwardClock`
-- This allows accelerated simulation and deterministic async behavior.
-
-Reference suites:
-
-- `tests/e2e/test_dispatch_flow.py`
-- `tests/e2e/test_maintenance_retry.py`
+- `src/vehicle_agent/agent.py` - vehicle state machine and tick loop
+- `src/orchestrator/agent.py` - central event handling and orchestration
+- `src/orchestrator/emergency_service.py` - lifecycle/timeouts/duration policy
+- `src/orchestrator/dispatch_engine.py` - selection, ETA, role assignment
+- `src/orchestrator/persistence.py` - telemetry/alert/analytics persistence adapters
 
 ## Related Docs
 
 - `docs/COMMUNICATION_PROTOCOL.md`
 - `docs/DATA_ARCHITECTURE.md`
 - `docs/SIMULATION.md`
+- `docs/FAILURE_ACTIVATION_API.md`
 - `docs/ROADMAP.md`

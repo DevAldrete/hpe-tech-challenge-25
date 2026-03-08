@@ -1,53 +1,51 @@
 # Project AEGIS Roadmap
 
-**Version:** 2.0.0
+**Version:** 2.1.0  
 **Last Updated:** 2026-03-08
 
-## Completed Baseline
+## Current Implemented Baseline
 
-- Core abstractions introduced (`Clock`, `MessageBus`, persistence sinks).
-- Redis and in-memory bus adapters implemented.
-- Vehicle/orchestrator refactored to dependency-injected runtime contracts.
-- Explicit vehicle registration event flow implemented.
-- Orchestrator persistence decoupled via persister components.
-- UTC timestamp consistency improved in core models.
-- E2E fast-forward suites added for dispatch and maintenance retry.
+- Runtime contracts in place: `Clock`, `MessageBus`, telemetry/alert persistence sinks.
+- Transport adapters in place: Redis runtime and in-memory deterministic test bus.
+- Explicit registration + telemetry + alert + alert-cleared flow implemented.
+- Dispatch lifecycle implemented with ack tracking, ETA estimate, and unit-role assignment.
+- Emergency lifecycle automation implemented (cancel, auto-resolve, dismiss rules).
+- Fast-forward simulation mode integrated into API runtime and E2E tests.
+- Navigation provider abstraction implemented with geometric default and optional OSMnx pathing.
 
 ## Near-Term Priorities
 
-### 1) Navigation abstraction and map realism
+### 1) Dispatch quality and realism
 
-- Introduce `NavigationProvider` contract.
-- Keep current geometric strategy as default implementation.
-- Add optional road-constrained implementation (OSMnx first).
-- Evaluate Valhalla integration for ETA/route quality if needed.
+- Improve ETA model beyond static average-speed heuristics.
+- Incorporate route quality metadata (distance source, confidence).
+- Add configurable dispatch strategy options beyond nearest-available.
 
-### 2) Stronger scenario coverage
+### 2) Reliability and resilience coverage
 
-- Add E2E for multi-unit dispatch edge cases.
-- Add E2E for high-frequency alert bursts and backpressure.
-- Add E2E for stale emergency sweeper and timeout policies.
+- Add E2E for partial dispatch acknowledgments and ack timeouts.
+- Add E2E for high alert volume and persistence lag behavior.
+- Add E2E for sweeper transitions across all terminal statuses.
 
-### 3) Observability and ops polish
+### 3) Observability and operational diagnostics
 
-- Add metrics for dispatch latency, queue depth, and persistence lag.
-- Add health endpoints and clearer runtime diagnostics.
+- Add metrics for dispatch latency, ack latency, and unresolved emergency age.
+- Add metrics for telemetry buffer depth and flush failures.
+- Expand health diagnostics to include message bus and persistence readiness.
 
 ## Medium-Term
 
-- Introduce richer event taxonomy for domain events.
-- Add replay-friendly event capture for simulation analysis.
-- Evaluate background task queue for non-real-time workloads only.
+- Add replay-ready event archive for post-incident analysis.
+- Introduce richer domain event taxonomy for analytics consumers.
+- Isolate heavy analytics/reporting workloads from orchestrator process.
 
-## Task Queue Position (Taskiq)
+## Background Job Queue Position
 
-Taskiq is optional and should not replace the real-time control loop.
+Task queue adoption remains optional and must stay out of the real-time dispatch control path.
 
-- Use current message bus for dispatch/telemetry/control events.
-- Consider Taskiq later for heavy async jobs:
-  - offline analytics,
+- Keep pub/sub channels as source for control events.
+- Use queue workers only for non-latency-critical tasks such as:
+  - analytics rollups,
   - enrichment pipelines,
-  - long-running route preprocessing,
-  - scheduled maintenance workflows.
-
-This keeps latency-sensitive orchestration simple while still allowing scalable async job execution where it helps.
+  - route precomputation,
+  - scheduled offline maintenance workflows.

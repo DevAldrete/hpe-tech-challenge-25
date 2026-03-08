@@ -1,64 +1,66 @@
 # Communication Protocol - Project AEGIS
 
-**Version:** 2.0.0
-**Protocol:** Redis Pub/Sub via `MessageBus` abstraction
-**Message Format:** JSON (Pydantic models)
+**Version:** 2.1.0  
+**Protocol:** Pub/Sub via `MessageBus` abstraction  
+**Runtime Transport:** Redis (`RedisMessageBus`)  
+**Test Transport:** In-memory (`InMemoryMessageBus`)  
+**Message Format:** JSON-serialized Pydantic models  
 **Last Updated:** 2026-03-08
 
-## Overview
+## Purpose
 
-AEGIS uses event-driven communication across vehicle agents and the orchestrator.
+This document defines the **message contract** between vehicle agents and the orchestrator.
 
-- Production transport: Redis pub/sub (`RedisMessageBus`)
-- Test transport: in-memory bus (`InMemoryMessageBus`)
-- Contract surface: `src/core/messaging.py`
+It is intentionally channel-driven and lightweight:
 
-The protocol is intentionally simple and channel-oriented.
+- channels encode routing context,
+- payloads carry typed domain data,
+- transport can change without changing payload contracts.
 
-## Channel Patterns in Use
+## Channel Taxonomy
 
 ### Vehicle -> Orchestrator
 
 - `aegis:{fleet_id}:vehicles:register`
-  - Startup metadata registration (`VehicleRegistrationEvent`)
+  - One-time startup metadata event (`VehicleRegistrationEvent`).
 - `aegis:{fleet_id}:telemetry:{vehicle_id}`
-  - Telemetry stream (`VehicleTelemetry`)
+  - High-frequency telemetry stream (`VehicleTelemetry`).
 - `aegis:{fleet_id}:alerts:{vehicle_id}`
-  - Predictive alert events (`PredictiveAlert`)
+  - Predictive maintenance events (`PredictiveAlert`).
 - `aegis:{fleet_id}:alerts_cleared:{vehicle_id}`
-  - Maintenance clear notification (JSON payload)
+  - Maintenance completion signal (small JSON object with `vehicle_id`).
+- `aegis:dispatch:{emergency_id}:ack`
+  - Dispatch acknowledgment from unit (`vehicle_id`, `dispatch_id`, `acknowledged_at`).
 
 ### Orchestrator -> Vehicle
 
 - `aegis:{fleet_id}:commands:{vehicle_id}`
-  - Direct dispatch commands
+  - Per-unit command channel (`dispatch` command payloads).
 - `aegis:dispatch:{emergency_id}:resolved`
-  - Resolution broadcast to release assigned units
+  - Broadcast resolution signal (`resolve` command + released vehicles).
+- `aegis:dispatch:{emergency_id}:dismissed`
+  - Broadcast dismissal signal for timeout-closed incidents.
 
-### Orchestrator Subscriptions
-
-The orchestrator subscribes with patterns:
+### Orchestrator internal subscription patterns
 
 - `aegis:*:vehicles:register`
 - `aegis:*:telemetry:*`
 - `aegis:*:alerts:*`
 - `aegis:*:alerts_cleared:*`
-- `aegis:emergencies:new`
+- `aegis:dispatch:*:ack`
 
-## Message Payloads
+## Payload Contracts
 
-### 1) Vehicle Registration Event
+### 1) Vehicle registration event
 
-Channel:
+Channel example:
 
 `aegis:fleet01:vehicles:register`
 
-Payload model:
+Model:
 
 - `src/models/events.py` -> `VehicleRegistrationEvent`
-- nested `src/models/vehicle.py` -> `VehicleRegistration`
-
-Example:
+- `src/models/vehicle.py` -> nested `VehicleRegistration`
 
 ```json
 {
@@ -73,17 +75,15 @@ Example:
 }
 ```
 
-### 2) Telemetry Event
+### 2) Telemetry event
 
-Channel:
+Channel example:
 
 `aegis:fleet01:telemetry:AMB-001`
 
-Payload model:
+Model:
 
 - `src/models/telemetry.py` -> `VehicleTelemetry`
-
-Example:
 
 ```json
 {
@@ -97,27 +97,36 @@ Example:
   "engine_temp_celsius": 89.2,
   "battery_voltage": 13.7,
   "fuel_level_percent": 74.5,
+  "oil_pressure_bar": 3.2,
+  "vibration_ms2": 0.9,
+  "brake_pad_mm": 11.3,
   "operational_status": "en_route"
 }
 ```
 
-### 3) Alert Event
+### 3) Predictive alert event
 
-Channel:
+Channel example:
 
 `aegis:fleet01:alerts:AMB-001`
 
-Payload model:
+Model:
 
 - `src/models/alerts.py` -> `PredictiveAlert`
 
-### 4) Dispatch Command
+Key fields consumed by orchestrator:
 
-Channel:
+- `vehicle_id`
+- `severity`
+- `category`
+- `component`
+- `safe_to_operate`
+
+### 4) Dispatch command
+
+Channel example:
 
 `aegis:fleet01:commands:AMB-001`
-
-Example:
 
 ```json
 {
@@ -128,17 +137,32 @@ Example:
     "latitude": 37.779,
     "longitude": -122.41
   },
-  "dispatch_id": "f2f09bd6-54e6-4ca0-8d8f-3d645fbcd167"
+  "dispatch_id": "f2f09bd6-54e6-4ca0-8d8f-3d645fbcd167",
+  "role": "triage",
+  "estimated_eta_minutes": 4.75
 }
 ```
 
-### 5) Resolve Broadcast
+### 5) Dispatch acknowledgment
 
-Channel:
+Channel example:
+
+`aegis:dispatch:2da5c2b7-7e34-4ee4-a020-ff33e274f530:ack`
+
+```json
+{
+  "vehicle_id": "AMB-001",
+  "emergency_id": "2da5c2b7-7e34-4ee4-a020-ff33e274f530",
+  "dispatch_id": "f2f09bd6-54e6-4ca0-8d8f-3d645fbcd167",
+  "acknowledged_at": "2026-03-08T00:00:02Z"
+}
+```
+
+### 6) Resolve broadcast
+
+Channel pattern:
 
 `aegis:dispatch:{emergency_id}:resolved`
-
-Example:
 
 ```json
 {
@@ -148,21 +172,43 @@ Example:
 }
 ```
 
-## Operational Rules
+### 7) Alert cleared notification
 
-- Vehicle startup publishes registration before steady-state telemetry.
-- Telemetry can also carry `vehicle_type`; orchestrator uses explicit metadata and keeps snapshot updated.
-- Resolution messages must include `"command": "resolve"` so vehicles apply state transition.
-- All timestamps are UTC-aware ISO 8601.
+Channel example:
 
-## Why this protocol shape
+`aegis:fleet01:alerts_cleared:AMB-001`
 
-- Keeps control loop low latency and easy to inspect.
-- Works with both Redis and in-memory runtime for deterministic E2E tests.
-- Separates real-time control from storage concerns (persistence handled by sinks).
+```json
+{
+  "vehicle_id": "AMB-001",
+  "cleared_at": "2026-03-08T00:10:00Z"
+}
+```
 
-## Future evolution
+## Processing Semantics
 
-- Keep this channel contract stable while adding route/navigation providers.
-- If background job workload grows, add a task queue for non-real-time work only.
-- MQTT/Kafka migration should preserve event payload schemas where possible.
+- Orchestrator parses all incoming payloads into model objects before mutation.
+- Invalid or malformed payloads are dropped with structured warning logs.
+- Orchestrator state updates happen before async persistence side effects.
+- Dispatch acks are matched by both `emergency_id` and `dispatch_id` to avoid stale updates.
+
+## Contract Invariants
+
+- Registration should occur before first telemetry from a vehicle process.
+- `dispatch` payloads must include `dispatch_id` for ack tracking.
+- Resolution payloads must include `command: "resolve"`.
+- All timestamps are UTC ISO-8601.
+- Vehicle identifiers are stable across all channel families.
+
+## Backward Compatibility Guidance
+
+- Add fields in payloads as optional first.
+- Do not rename/remove existing required keys without coordinated rollout.
+- Preserve channel patterns; add new channels instead of overloading existing semantics.
+- Keep command values explicit (`dispatch`, `resolve`, `dismiss`) rather than inferred by channel alone.
+
+## Related Docs
+
+- `docs/ARCHITECTURE.md`
+- `docs/DATA_ARCHITECTURE.md`
+- `docs/SIMULATION.md`
