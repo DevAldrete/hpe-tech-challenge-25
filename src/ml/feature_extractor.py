@@ -130,14 +130,17 @@ class CrimeFeatureExtractor:
         """
         df = df.copy()
 
-        # 1. Asegurar formato de fechas
-        if 'fecha_dt' not in df.columns:
-            if 'fecha' in df.columns:
-                df['fecha_dt'] = pd.to_datetime(df['fecha'], format='%d/%m/%Y', errors='coerce')
-            else:
-                df['fecha_dt'] = pd.Timestamp.now()
+        # Ensure date format is correct
+        if 'fecha_dt' in df.columns:
+            # It exists but as a string, so we convert it
+            df['fecha_dt'] = pd.to_datetime(df['fecha_dt'], errors='coerce')
+        elif 'fecha' in df.columns:
+            # Fallback if only 'fecha' exists
+            df['fecha_dt'] = pd.to_datetime(df['fecha'], format='%d/%m/%Y', errors='coerce')
+        else:
+            df['fecha_dt'] = pd.Timestamp.now()
 
-        # 2. Características temporales básicas
+        # Basic temporal features
         if 'hour_int' not in df.columns:
             df['hour_int'] = pd.to_datetime(df['hora'], format='%H:%M', errors='coerce').dt.hour
 

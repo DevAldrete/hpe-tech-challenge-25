@@ -2,6 +2,8 @@
 Offline training script for the crime prediction model.
 """
 
+from pathlib import Path
+
 import pandas as pd
 import joblib
 from sklearn.ensemble import RandomForestClassifier
@@ -99,5 +101,7 @@ def train_crime_model(csv_path: str, output_model_path: str = 'src/ml/crime_mode
     joblib.dump(model_package, output_model_path)
 
 if __name__ == "__main__":
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    csv_file = PROJECT_ROOT / "data" / "delitos_sf.csv"
     # Execute the training pipeline
-    train_crime_model("delitos_sf.csv")
+    train_crime_model(str(csv_file))

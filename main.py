@@ -194,20 +194,29 @@ def _render_folium_map(fleet_data: dict | None, emergencies: list | None) -> Non
             has_any_marker = True
             severity = e.get("severity", "unknown")
             etype = e.get("emergency_type", "unknown").replace("_", " ").title()
+            description = e.get("description", "")
+
+            # Check if this is an AI-generated predictive crime
+            is_ai_prediction = "AI Prediction" in description
+
+            # Customize the marker color and icon
+            marker_color = "darkpurple" if is_ai_prediction else "orange"
+            marker_icon = "eye-open" if is_ai_prediction else "exclamation-sign"
+            tooltip_icon = "👁️ AI" if is_ai_prediction else "🚨"
 
             popup_html = (
-                f"<b>🚨 {etype}</b><br>"
+                f"<b>{tooltip_icon} {etype}</b><br>"
                 f"Severity: <b>{severity}</b><br>"
                 f"Status: {e.get('status', 'N/A')}<br>"
-                f"Description: {e.get('description', '')}<br>"
+                f"Description: {description}<br>"
                 f"Assigned: {', '.join(e.get('assigned_vehicles', [])) or 'None'}"
             )
 
             folium.Marker(
                 location=[e["latitude"], e["longitude"]],
                 popup=folium.Popup(popup_html, max_width=260),
-                tooltip=f"🚨 {etype} (sev {severity})",
-                icon=folium.Icon(color="orange", icon="exclamation-sign", prefix="glyphicon"),
+                tooltip=f"{tooltip_icon} {etype} (sev {severity})",
+                icon=folium.Icon(color=marker_color, icon=marker_icon, prefix="glyphicon"),
             ).add_to(fmap)
 
     if not has_any_marker:
